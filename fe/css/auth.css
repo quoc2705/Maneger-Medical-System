@@ -254,3 +254,15 @@
 @keyframes splash-load {
   to { width: 100%; }
 }
+
+.auth-link {
+  font-size: 13px;
+  color: var(--c-navy-light);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.auth-link:hover {
+  color: var(--c-accent);
+  text-decoration: underline;
+}

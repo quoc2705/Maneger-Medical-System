@@ -145,6 +145,41 @@ class NguoiDungUpdateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('Số điện thoại đã được sử dụng')
         return value
 
+def _validate_mat_khau_manh(value):
+    if len(value) < 8:
+        raise serializers.ValidationError('Mật khẩu phải có ít nhất 8 ký tự')
+    if not any(c.isupper() for c in value):
+        raise serializers.ValidationError('Mật khẩu phải có ít nhất 1 chữ hoa')
+    if not any(c.isdigit() for c in value):
+        raise serializers.ValidationError('Mật khẩu phải có ít nhất 1 chữ số')
+    special_chars = '!@#$%^&*()_+-=[]{}|;:,.<>?'
+    if not any(c in special_chars for c in value):
+        raise serializers.ValidationError('Mật khẩu phải có ít nhất 1 ký tự đặc biệt')
+    return value
+
+
+class ForgotPasswordSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+
+    def validate_email(self, value):
+        return (value or '').strip().lower()
+
+
+class ResetPasswordSerializer(serializers.Serializer):
+    uid = serializers.CharField(required=True)
+    token = serializers.CharField(required=True)
+    new_password = serializers.CharField(required=True, style={'input_type': 'password'})
+    new_password2 = serializers.CharField(required=True, style={'input_type': 'password'})
+
+    def validate_new_password(self, value):
+        return _validate_mat_khau_manh(value)
+
+    def validate(self, data):
+        if data['new_password'] != data['new_password2']:
+            raise serializers.ValidationError({'new_password': 'Mật khẩu không khớp'})
+        return data
+
+
 class ChangePasswordSerializer(serializers.Serializer):
     """Serializer cho đổi mật khẩu"""
     old_password = serializers.CharField(required=True, style={'input_type': 'password'})
@@ -495,6 +530,21 @@ class DoctorScheduleCreateSerializer(serializers.ModelSerializer):
         if value not in valid:
             raise serializers.ValidationError('Ca làm phải là SANG, CHIEU hoặc TOI')
         return value
+
+    def validate(self, data):
+        from .doctor_schedule import CA_LABEL, ca_lam_da_qua
+
+        ngay = data.get('ngay_lam')
+        ca = data.get('ca_lam')
+        if ngay and ca and ca_lam_da_qua(ngay, ca):
+            ten_ca = CA_LABEL.get(ca, ca)
+            raise serializers.ValidationError({
+                'ca_lam': (
+                    f'{ten_ca} ngày {ngay.strftime("%d/%m/%Y")} đã qua, '
+                    f'không thể đăng ký ca này.'
+                ),
+            })
+        return data
 
 
 class LichLamViecSerializer(serializers.ModelSerializer):

@@ -354,6 +354,19 @@ class LichSuLichHenSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['created_at']
 
+class GuiNhacBenhNhanSerializer(serializers.Serializer):
+    """Lễ tân gửi nhắc bệnh nhân tại quầy (tiếp nhận / hàng chờ)."""
+    LOAI = (
+        ('NHAC_CO_HEN', 'Nhắc có lịch hẹn'),
+        ('SAP_DEN_LUOT', 'Sắp đến lượt'),
+        ('MOI_VAO_PHONG', 'Mời vào phòng'),
+        ('CHO_DOI', 'Vui lòng chờ'),
+        ('TU_CHON', 'Tùy chỉnh'),
+    )
+    loai = serializers.ChoiceField(choices=[c[0] for c in LOAI], default='TU_CHON')
+    noi_dung = serializers.CharField(required=False, allow_blank=True, max_length=2000)
+
+
 # ==================== SERIALIZERS CHO NHẮC NHỞ ====================
 
 class NhacNhoLichHenSerializer(serializers.ModelSerializer):

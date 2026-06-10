@@ -16,10 +16,20 @@ app.conf.beat_schedule = {
         'schedule': crontab(minute='*/15'),
     },
     
-    # Kiểm tra thuốc hết hạn mỗi tuần (Thứ 2 lúc 9h)
+    # Kiểm tra thuốc hết hạn mỗu tuần (Thứ 2 lúc 9h)
     'kiem-tra-thuoc-het-han-hang-tuan': {
         'task': 'thongbao.tasks.kiem_tra_thuoc_het_han',
         'schedule': crontab(day_of_week=1, hour=9, minute=0),  # 9:00 AM Thứ 2
+    },
+
+    # Hủy lịch hẹn quá ngày — mỗi ngày 00:30 và mỗi 6 giờ (phòng Celery tắt)
+    'huy-lich-hen-qua-ngay-dem': {
+        'task': 'lichhen.tasks.huy_lich_hen_qua_ngay_task',
+        'schedule': crontab(hour=0, minute=30),
+    },
+    'huy-lich-hen-qua-ngay-6h': {
+        'task': 'lichhen.tasks.huy_lich_hen_qua_ngay_task',
+        'schedule': crontab(minute=15, hour='*/6'),
     },
 }
 

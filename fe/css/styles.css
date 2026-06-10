@@ -1542,6 +1542,18 @@ textarea.form-control { resize: vertical; min-height: 90px; }
   content: '✓';
   font-weight: 800;
 }
+.bs-llv-ca-card--disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+  background: var(--c-bg-subtle);
+  border-style: dashed;
+}
+.bs-llv-ca-card--disabled .bs-llv-ca-time::after {
+  content: ' · Đã qua';
+  color: var(--c-danger, #dc2626);
+  font-weight: 700;
+}
 .bs-llv-note .form-control {
   border-radius: var(--radius-sm);
   min-height: 44px;
@@ -2372,6 +2384,76 @@ textarea.form-control { resize: vertical; min-height: 90px; }
   flex-direction: column;
   gap: 8px;
   min-width: 200px;
+}
+
+.lt-btn-nhac {
+  white-space: nowrap;
+}
+
+.lt-nhac-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10050;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.lt-nhac-box {
+  width: min(440px, 100%);
+  background: var(--c-white);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 20px;
+}
+
+.lt-nhac-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.lt-nhac-head h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--c-navy);
+}
+
+.lt-nhac-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lt-nhac-opt {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.lt-nhac-opt:has(input:checked) {
+  border-color: var(--c-accent);
+  background: #eff6ff;
+}
+
+.lt-nhac-opt input {
+  margin-top: 2px;
+}
+
+.lt-nhac-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
 }
 
 .lt-table-pro {

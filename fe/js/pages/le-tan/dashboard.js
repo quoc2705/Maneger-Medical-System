@@ -35,6 +35,7 @@ const PageLeTanDashboard = {
   },
 
   _msgApiLoi(res) {
+    if (window.ApiErrors) return ApiErrors.format(res, 'Không có phản hồi');
     const d = res && res.data;
     if (d == null) return res?.status ? `HTTP ${res.status}` : 'Không có phản hồi';
     if (typeof d === 'object' && d.error != null) {
@@ -43,6 +44,26 @@ const PageLeTanDashboard = {
     if (d.detail) return String(d.detail);
     if (d.goi_y) return String(d.goi_y);
     return JSON.stringify(d);
+  },
+
+  _hienLoiDangKy(msg) {
+    const el = document.getElementById('lt-dk-loi');
+    if (!el) {
+      Toast.loi('Lỗi', msg, 'error');
+      return;
+    }
+    el.textContent = msg;
+    el.style.display = 'block';
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    Toast.loi('Lỗi', msg, 'error');
+  },
+
+  _anLoiDangKy() {
+    const el = document.getElementById('lt-dk-loi');
+    if (el) {
+      el.textContent = '';
+      el.style.display = 'none';
+    }
   },
 
   _ltFormatGio(iso) {
@@ -255,7 +276,8 @@ const PageLeTanDashboard = {
       <div class="card">
         <div class="card-header"><div class="card-title">Đăng ký tài khoản bệnh nhân (tại quầy)</div></div>
         <div class="card-body">
-          <p class="text-muted small mb-3">Tài khoản luôn là vai trò <strong>Bệnh nhân</strong>. Mật khẩu: tối thiểu 8 ký tự, có chữ hoa, số và ký tự đặc biệt (theo quy định hệ thống).</p>
+          <p class="text-muted small mb-3">Tài khoản luôn là vai trò <strong>Bệnh nhân</strong>. Mật khẩu: tối thiểu 8 ký tự, có chữ hoa, số và ký tự đặc biệt (!@#$%…). Tên đăng nhập ≥3 ký tự, không trùng. SĐT dạng 0xxxxxxxxx.</p>
+          <div id="lt-dk-loi" class="form-alert error mb-3" style="display:none" role="alert"></div>
           <div class="grid-2">
             <div><label class="form-label">Tên đăng nhập *</label>
               <input id="lt-dk-user" class="form-control" autocomplete="off"/></div>
@@ -284,29 +306,68 @@ const PageLeTanDashboard = {
   },
 
   async _submitDangKy() {
+    this._anLoiDangKy();
+
+    const user = document.getElementById('lt-dk-user')?.value?.trim() || '';
     const pw1 = document.getElementById('lt-dk-pw1')?.value || '';
     const pw2 = document.getElementById('lt-dk-pw2')?.value || '';
-    if (pw1 !== pw2) {
-      Toast.loi('Mật khẩu không khớp', '', 'error');
+    const hoTen = document.getElementById('lt-dk-hoten')?.value?.trim() || '';
+    const email = document.getElementById('lt-dk-email')?.value?.trim() || '';
+    const sdt = window.ApiErrors
+      ? ApiErrors.normalizePhoneVN(document.getElementById('lt-dk-sdt')?.value)
+      : (document.getElementById('lt-dk-sdt')?.value?.trim() || '');
+    const ngaySinh = document.getElementById('lt-dk-ns')?.value || '';
+    const gioiTinh = document.getElementById('lt-dk-gt')?.value || 'NAM';
+    const diaChi = document.getElementById('lt-dk-dc')?.value?.trim() || '';
+
+    if (!user || !pw1 || !pw2 || !hoTen || !email || !sdt || !ngaySinh || !diaChi) {
+      this._hienLoiDangKy('Vui lòng nhập đầy đủ các trường bắt buộc (*)');
       return;
     }
+    if (user.length < 3) {
+      this._hienLoiDangKy('Tên đăng nhập phải có ít nhất 3 ký tự');
+      return;
+    }
+    if (pw1 !== pw2) {
+      this._hienLoiDangKy('Mật khẩu nhập lại không khớp');
+      return;
+    }
+    const pwErr = window.ApiErrors ? ApiErrors.validateMatKhau(pw1) : null;
+    if (pwErr) {
+      this._hienLoiDangKy(pwErr);
+      return;
+    }
+
     const body = {
       nguoi_dung: {
-        ten_dang_nhap: document.getElementById('lt-dk-user')?.value?.trim(),
+        ten_dang_nhap: user,
         password: pw1,
         password2: pw2,
-        ho_ten: document.getElementById('lt-dk-hoten')?.value?.trim(),
-        email: document.getElementById('lt-dk-email')?.value?.trim(),
-        so_dien_thoai: document.getElementById('lt-dk-sdt')?.value?.trim(),
-        ngay_sinh: document.getElementById('lt-dk-ns')?.value,
-        gioi_tinh: document.getElementById('lt-dk-gt')?.value,
-        dia_chi: document.getElementById('lt-dk-dc')?.value?.trim(),
+        ho_ten: hoTen,
+        email,
+        so_dien_thoai: sdt,
+        ngay_sinh: ngaySinh,
+        gioi_tinh: gioiTinh,
+        dia_chi: diaChi,
       },
-      ngay_sinh: document.getElementById('lt-dk-ns')?.value,
-      gioi_tinh: document.getElementById('lt-dk-gt')?.value,
-      dia_chi: document.getElementById('lt-dk-dc')?.value?.trim(),
+      ngay_sinh: ngaySinh,
+      gioi_tinh: gioiTinh,
+      dia_chi: diaChi,
     };
+
+    const btn = document.querySelector('#lt-dk-loi')?.closest('.card-body')?.querySelector('button.btn-primary');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang tạo...';
+    }
+
     const res = await Http.tao('/admin/benh-nhan/', body);
+
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = 'Tạo tài khoản';
+    }
+
     if (res.ok) {
       Toast.hien('Thành công', `Mã BN: ${res.data?.ma_benh_nhan || ''}`, 'success');
       ['lt-dk-user', 'lt-dk-pw1', 'lt-dk-pw2', 'lt-dk-hoten', 'lt-dk-email', 'lt-dk-sdt', 'lt-dk-ns', 'lt-dk-dc'].forEach((id) => {
@@ -315,7 +376,9 @@ const PageLeTanDashboard = {
       });
       const gt = document.getElementById('lt-dk-gt');
       if (gt) gt.value = 'NAM';
-    } else Toast.loi('Lỗi', this._msgApiLoi(res), 'error');
+    } else {
+      this._hienLoiDangKy(this._msgApiLoi(res));
+    }
   },
 
   _caTuGioHen(iso) {
@@ -459,6 +522,10 @@ const PageLeTanDashboard = {
                     .join('')}
                 </select>
                 <button type="button" class="btn btn-sm btn-outline" onclick="PageLeTanDashboard._doPhanCong('${l.id}','${selId}')">Gán</button>
+                <button type="button" class="btn btn-sm btn-outline lt-btn-nhac" data-lt-nhac="1"
+                  data-lich-id="${this._esc(l.id)}" data-ten-bn="${this._esc(l.ten_benh_nhan || '')}" data-nhac-ctx="co-hen">
+                  <i class="fas fa-bell"></i> Nhắc BN
+                </button>
               </div>
             </article>`;
           })
@@ -475,6 +542,7 @@ const PageLeTanDashboard = {
           ${cards}
         </div>
       </div>`;
+    this._ganNutNhac(host);
   },
 
   async _panelLaySo(panelId) {
@@ -673,6 +741,18 @@ const PageLeTanDashboard = {
                 </select>
                 <button type="button" class="btn btn-sm btn-outline" onclick="PageLeTanDashboard._doPhanCongDp('${this._esc(l.id)}','${selId}')">Gán BS</button>
                 <button type="button" class="btn btn-sm btn-primary" onclick="PageLeTanDashboard._savePhong('${this._esc(l.id)}','${mid}','${tid}')">Lưu phòng</button>
+                <button type="button" class="btn btn-sm btn-outline lt-btn-nhac" data-lt-nhac-nhanh="1"
+                  data-lich-id="${this._esc(l.id)}" data-loai="SAP_DEN_LUOT">
+                  <i class="fas fa-hourglass-half"></i> Sắp lượt
+                </button>
+                <button type="button" class="btn btn-sm btn-outline lt-btn-nhac" data-lt-nhac-nhanh="1"
+                  data-lich-id="${this._esc(l.id)}" data-loai="MOI_VAO_PHONG">
+                  <i class="fas fa-door-open"></i> Vào phòng
+                </button>
+                <button type="button" class="btn btn-sm btn-outline lt-btn-nhac" data-lt-nhac="1"
+                  data-lich-id="${this._esc(l.id)}" data-ten-bn="${this._esc(l.ten_benh_nhan || '')}" data-nhac-ctx="hang-cho">
+                  <i class="fas fa-bell"></i> Nhắc khác
+                </button>
               </div>
             </article>`;
           })
@@ -688,6 +768,133 @@ const PageLeTanDashboard = {
           ${cards}
         </div>
       </div>`;
+    this._ganNutNhac(host);
+  },
+
+  _ganNutNhac(root) {
+    if (!root) return;
+    root.querySelectorAll('[data-lt-nhac]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const lichId = btn.getAttribute('data-lich-id');
+        const tenBn = btn.getAttribute('data-ten-bn') || '';
+        const ctx = btn.getAttribute('data-nhac-ctx') || 'hang-cho';
+        if (lichId) this._moNhacBn(lichId, tenBn, ctx);
+      });
+    });
+    root.querySelectorAll('[data-lt-nhac-nhanh]').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const lichId = btn.getAttribute('data-lich-id');
+        const loai = btn.getAttribute('data-loai');
+        if (lichId && loai) await this._guiNhacNhanh(lichId, loai);
+      });
+    });
+  },
+
+  _NHAC_LOAI: {
+    'co-hen': [
+      { id: 'NHAC_CO_HEN', label: 'Nhắc có lịch hẹn — mời đến check-in' },
+      { id: 'TU_CHON', label: 'Tùy chỉnh nội dung' },
+    ],
+    'hang-cho': [
+      { id: 'SAP_DEN_LUOT', label: 'Sắp đến lượt khám' },
+      { id: 'MOI_VAO_PHONG', label: 'Mời vào phòng (dùng mã phòng đã lưu)' },
+      { id: 'CHO_DOI', label: 'Nhắc chờ thêm' },
+      { id: 'TU_CHON', label: 'Tùy chỉnh nội dung' },
+    ],
+  },
+
+  _dongModalNhac() {
+    const el = document.getElementById('lt-nhac-modal');
+    if (el) el.remove();
+  },
+
+  _moNhacBn(lichId, tenBn, context) {
+    this._dongModalNhac();
+    const presets = this._NHAC_LOAI[context] || this._NHAC_LOAI['hang-cho'];
+    const opts = presets
+      .map((p, i) => `<label class="lt-nhac-opt">
+        <input type="radio" name="lt-nhac-loai" value="${p.id}" ${i === 0 ? 'checked' : ''}/>
+        <span>${this._esc(p.label)}</span>
+      </label>`)
+      .join('');
+
+    const wrap = document.createElement('div');
+    wrap.id = 'lt-nhac-modal';
+    wrap.className = 'lt-nhac-overlay';
+    wrap.innerHTML = `
+      <div class="lt-nhac-box" role="dialog" aria-labelledby="lt-nhac-title">
+        <div class="lt-nhac-head">
+          <h3 id="lt-nhac-title"><i class="fas fa-bell"></i> Gửi nhắc bệnh nhân</h3>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="PageLeTanDashboard._dongModalNhac()">✕</button>
+        </div>
+        <p class="text-muted small mb-2">Gửi thông báo in-app tới <strong>${this._esc(tenBn || 'bệnh nhân')}</strong> (chuông thông báo trên tài khoản BN).</p>
+        <div class="lt-nhac-opts">${opts}</div>
+        <label class="form-label mt-2">Ghi chú thêm (tuỳ chọn)</label>
+        <textarea id="lt-nhac-ghi-chu" class="form-control" rows="3" placeholder="Nội dung bổ sung hoặc nhắn tùy chỉnh…"></textarea>
+        <div id="lt-nhac-loi" class="form-alert error mt-2" style="display:none"></div>
+        <div class="lt-nhac-foot">
+          <button type="button" class="btn btn-outline" onclick="PageLeTanDashboard._dongModalNhac()">Huỷ</button>
+          <button type="button" class="btn btn-primary" id="lt-nhac-gui">
+            <i class="fas fa-paper-plane"></i> Gửi thông báo
+          </button>
+        </div>
+      </div>`;
+    document.body.appendChild(wrap);
+    const box = wrap.querySelector('.lt-nhac-box');
+    wrap.addEventListener('click', (e) => {
+      if (e.target === wrap) this._dongModalNhac();
+    });
+    if (box) {
+      box.addEventListener('click', (e) => e.stopPropagation());
+    }
+    const guiBtn = document.getElementById('lt-nhac-gui');
+    if (guiBtn) guiBtn.onclick = () => this._guiNhacTuModal(lichId);
+  },
+
+  async _guiNhacTuModal(lichId) {
+    const loai = document.querySelector('input[name="lt-nhac-loai"]:checked')?.value || 'TU_CHON';
+    const ghiChu = document.getElementById('lt-nhac-ghi-chu')?.value?.trim() || '';
+    const errEl = document.getElementById('lt-nhac-loi');
+    if (loai === 'TU_CHON' && !ghiChu) {
+      if (errEl) {
+        errEl.textContent = 'Vui lòng nhập nội dung khi chọn tùy chỉnh';
+        errEl.style.display = 'block';
+      }
+      return;
+    }
+    if (errEl) errEl.style.display = 'none';
+    const btn = document.getElementById('lt-nhac-gui');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang gửi…';
+    }
+    const ok = await this._guiNhacBn(lichId, loai, ghiChu);
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-paper-plane"></i> Gửi thông báo';
+    }
+    if (ok) this._dongModalNhac();
+  },
+
+  async _guiNhacNhanh(lichId, loai) {
+    await this._guiNhacBn(lichId, loai, '');
+  },
+
+  async _guiNhacBn(lichId, loai, noiDung) {
+    const res = await Http.tao(`/lich-hen/lich-hen/${lichId}/gui_nhac_benh_nhan/`, {
+      loai,
+      noi_dung: noiDung || '',
+    });
+    if (res.ok) {
+      Toast.hien('Đã gửi nhắc', res.data?.tieu_de || 'Bệnh nhân sẽ thấy trong chuông thông báo', 'success');
+      return true;
+    }
+    Toast.loi('Không gửi được', this._msgApiLoi(res), 'error');
+    return false;
   },
 
   async _doCheckIn(lichId) {

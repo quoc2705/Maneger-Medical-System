@@ -40,6 +40,29 @@ def phan_ca_tu_gio(time_obj):
     return CA_TOI
 
 
+# Giờ kết thúc đăng ký ca trong ngày (theo TIME_ZONE)
+_CA_HET_GIO = {
+    CA_SANG: 12,   # sau 11:59
+    CA_CHIEU: 18,  # sau 17:59
+    CA_TOI: 22,    # sau 21:59
+}
+
+
+def ca_lam_da_qua(ngay_date, ca_lam, now=None):
+    """True nếu ngày/ca đã qua — không cho đăng ký mới."""
+    now = now or timezone.now()
+    local = timezone.localtime(now)
+    today = local.date()
+    if ngay_date < today:
+        return True
+    if ngay_date > today:
+        return False
+    het_gio = _CA_HET_GIO.get(ca_lam)
+    if het_gio is None:
+        return False
+    return local.hour >= het_gio
+
+
 def bac_si_id_co_ca_trong_ngay(ngay_date, ca_lam):
     from nguoidung.models import DoctorSchedule
 

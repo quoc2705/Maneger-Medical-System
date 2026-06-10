@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.shortcuts import get_object_or_404, redirect
 from django.db import transaction, IntegrityError
 from django.db.models import Q, Count, Avg, Sum
@@ -25,6 +26,10 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.utils.decorators import method_decorator
 
 from rest_framework.permissions import BasePermission
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.encoding import force_str
+from django.utils.http import urlsafe_base64_decode
+from .password_reset import FORGOT_PASSWORD_MSG, build_reset_link, gui_email_dat_lai_mat_khau
 # views.py - Thêm vào cuối file
 from rest_framework_simplejwt.views import TokenRefreshView
 from rest_framework.views import APIView
@@ -76,11 +81,7 @@ class NguoiDungViewSet(viewsets.ModelViewSet):
     
     def get_permissions(self):
         """Override permissions based on action"""
-        if self.action == 'register':
-            # Register không cần authentication
-            permission_classes = [AllowAny]
-        elif self.action == 'login':
-            # Login không cần authentication
+        if self.action in ('register', 'login', 'forgot_password', 'reset_password'):
             permission_classes = [AllowAny]
         else:
             permission_classes = [IsAuthenticated]
@@ -131,7 +132,10 @@ class NguoiDungViewSet(viewsets.ModelViewSet):
                 'access': str(refresh.access_token),
                 'refresh': str(refresh),
             }, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {'error': 'Dữ liệu đăng ký không hợp lệ', 'details': serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def login(self, request):
@@ -217,6 +221,71 @@ class NguoiDungViewSet(viewsets.ModelViewSet):
             serializer.save()
             return Response(NguoiDungSerializer(request.user).data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny])
+    def forgot_password(self, request):
+        """Gửi email đặt lại mật khẩu (không tiết lộ email có tồn tại hay không)."""
+        serializer = ForgotPasswordSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        email = serializer.validated_data['email']
+        user = NguoiDung.objects.filter(
+            email__iexact=email,
+            is_active=True,
+            deleted_at__isnull=True,
+        ).first()
+
+        payload = {'message': FORGOT_PASSWORD_MSG}
+        if user and not user.is_locked:
+            reset_url = build_reset_link(user)
+            gui_email_dat_lai_mat_khau(user, reset_url=reset_url)
+            if settings.DEBUG:
+                payload['reset_url'] = reset_url
+
+        return Response(payload)
+
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny])
+    def reset_password(self, request):
+        """Đặt mật khẩu mới từ liên kết trong email."""
+        serializer = ResetPasswordSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            uid = force_str(urlsafe_base64_decode(serializer.validated_data['uid']))
+            user = NguoiDung.objects.get(pk=uid, is_active=True, deleted_at__isnull=True)
+        except (TypeError, ValueError, OverflowError, NguoiDung.DoesNotExist):
+            return Response(
+                {'detail': 'Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        token = serializer.validated_data['token']
+        if not default_token_generator.check_token(user, token):
+            return Response(
+                {'detail': 'Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user.set_password(serializer.validated_data['new_password'])
+        user.password_changed_at = timezone.now()
+        user.login_attempts = 0
+        if user.is_locked:
+            user.unlock_account()
+        user.save()
+
+        try:
+            NhatKyHoatDong.objects.create(
+                nguoi_dung=user,
+                hanh_dong='SUA',
+                doi_tuong='NguoiDung',
+                du_lieu_moi={'password_reset': True},
+            )
+        except Exception:
+            pass
+
+        return Response({'message': 'Đặt lại mật khẩu thành công. Bạn có thể đăng nhập ngay.'})
 
     @action(detail=False, methods=['post'])
     def change_password(self, request):

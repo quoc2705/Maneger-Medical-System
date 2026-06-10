@@ -205,30 +205,9 @@ async function handleRegister(event) {
                 window.location.href = '/login/';
             }, 2000);
         } else {
-            // Xử lý lỗi từ server
-            let errorMessage = 'Đăng ký thất bại. Vui lòng kiểm tra lại thông tin.';
-            
-            if (result && typeof result === 'object') {
-                // Lấy lỗi đầu tiên từ response
-                const firstErrorField = Object.keys(result)[0];
-                if (firstErrorField) {
-                    const fieldErrors = result[firstErrorField];
-                    if (Array.isArray(fieldErrors) && fieldErrors.length > 0) {
-                        errorMessage = fieldErrors[0];
-                    } else if (typeof fieldErrors === 'string') {
-                        errorMessage = fieldErrors;
-                    } else {
-                        errorMessage = `${firstErrorField}: ${JSON.stringify(fieldErrors)}`;
-                    }
-                } else if (result.message) {
-                    errorMessage = result.message;
-                } else if (result.error) {
-                    errorMessage = result.error;
-                } else if (result.non_field_errors) {
-                    errorMessage = result.non_field_errors[0];
-                }
-            }
-            
+            const errorMessage = window.ApiErrors
+                ? ApiErrors.format({ data: result }, 'Đăng ký thất bại. Vui lòng kiểm tra lại thông tin.')
+                : 'Đăng ký thất bại. Vui lòng kiểm tra lại thông tin.';
             showAlert(errorMessage, 'error');
         }
     } catch (error) {

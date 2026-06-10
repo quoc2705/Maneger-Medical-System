@@ -13,6 +13,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from .models import *
 from .serializers import *
 from .reminder_services import dong_bo_nhac_cho_lich_hen
+from .overdue_services import huy_lich_hen_qua_ngay
 from nguoidung.models import BacSi, BenhNhan
 from nguoidung.doctor_schedule import (
     phan_ca_tu_thoi_diem,
@@ -178,6 +179,10 @@ class LichHenViewSet(viewsets.ModelViewSet):
         elif self.action in ['update', 'partial_update']:
             return LichHenUpdateSerializer
         return LichHenSerializer
+
+    def list(self, request, *args, **kwargs):
+        huy_lich_hen_qua_ngay(limit=200)
+        return super().list(request, *args, **kwargs)
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -510,6 +515,108 @@ class LichHenViewSet(viewsets.ModelViewSet):
         lich_hen.save(update_fields=['ma_phong', 'ten_phong', 'ngay_cap_nhat'])
         return Response(LichHenDetailSerializer(lich_hen).data)
 
+    def _noi_dung_nhac_letan(self, lich_hen, loai, custom=''):
+        """Soạn tiêu đề + nội dung thông báo nhắc BN theo mẫu lễ tân."""
+        bn_ten = lich_hen.benh_nhan.nguoi_dung.ho_ten
+        ma = lich_hen.ma_lich_hen or str(lich_hen.pk)[:8]
+        stt = lich_hen.stt_trong_ngay
+        phong = (lich_hen.ten_phong or lich_hen.ma_phong or '').strip()
+        bs = ''
+        if lich_hen.bac_si_id and getattr(lich_hen.bac_si, 'nguoi_dung', None):
+            bs = lich_hen.bac_si.nguoi_dung.ho_ten
+        gio = ''
+        if lich_hen.ngay_gio_hen:
+            gio = timezone.localtime(lich_hen.ngay_gio_hen).strftime('%H:%M %d/%m/%Y')
+
+        if loai == 'NHAC_CO_HEN':
+            tieu_de = 'Nhắc lịch hẹn tại phòng khám'
+            noi_dung = (
+                f'Kính gửi {bn_ten}, bạn có lịch {lich_hen.get_loai_lich_display()} '
+                f'lúc {gio} (mã {ma}). Vui lòng đến quầy lễ tân để check-in.'
+            )
+        elif loai == 'SAP_DEN_LUOT':
+            tieu_de = 'Sắp đến lượt khám'
+            stt_txt = f' STT {stt}.' if stt is not None else ''
+            noi_dung = f'Kính gửi {bn_ten},{stt_txt} bạn sắp đến lượt. Vui lòng chờ tại khu vực chờ.'
+        elif loai == 'MOI_VAO_PHONG':
+            tieu_de = 'Mời vào phòng khám'
+            phong_txt = f' {phong}' if phong else ''
+            noi_dung = f'Kính gửi {bn_ten}, mời bạn vào phòng{phong_txt}.'
+            if bs:
+                noi_dung += f' Bác sĩ: {bs}.'
+        elif loai == 'CHO_DOI':
+            tieu_de = 'Nhắc chờ khám'
+            noi_dung = (
+                f'Kính gửi {bn_ten}, lịch {ma} đang trong hàng chờ. '
+                f'Vui lòng chờ đến khi được gọi.'
+            )
+        else:
+            tieu_de = 'Thông báo từ quầy lễ tân'
+            noi_dung = custom or f'Kính gửi {bn_ten}, vui lòng liên hệ quầy lễ tân (lịch {ma}).'
+
+        if custom and loai != 'TU_CHON':
+            noi_dung = f'{noi_dung} Ghi chú: {custom}'
+        return tieu_de, noi_dung
+
+    @action(detail=True, methods=['post'], url_path='gui_nhac_benh_nhan')
+    def gui_nhac_benh_nhan(self, request, pk=None):
+        """Gửi thông báo in-app nhắc bệnh nhân (lễ tân tại quầy)."""
+        if request.user.vai_tro not in ['NHAN_VIEN', 'BAC_SI', 'ADMIN'] and not request.user.is_superuser:
+            return Response({'error': 'Không có quyền gửi nhắc'}, status=status.HTTP_403_FORBIDDEN)
+
+        lich_hen = self.get_object()
+        ser = GuiNhacBenhNhanSerializer(data=request.data)
+        if not ser.is_valid():
+            return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        loai = ser.validated_data.get('loai') or 'TU_CHON'
+        custom = (ser.validated_data.get('noi_dung') or '').strip()
+        if loai == 'TU_CHON' and not custom:
+            return Response(
+                {'noi_dung': 'Vui lòng nhập nội dung khi chọn tùy chỉnh'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        tieu_de, noi_dung = self._noi_dung_nhac_letan(lich_hen, loai, custom)
+        nguoi_nhan = lich_hen.benh_nhan.nguoi_dung
+        now = timezone.now()
+
+        self._tao_thong_bao(
+            nguoi_nhan,
+            tieu_de,
+            noi_dung,
+            du_lieu_lien_quan={
+                'lich_hen_id': str(lich_hen.pk),
+                'ma_lich_hen': lich_hen.ma_lich_hen,
+                'loai_nhac': loai,
+                'nguoi_gui_id': str(request.user.pk),
+                'nguoi_gui_ten': request.user.ho_ten,
+            },
+        )
+        NhacNhoLichHen.objects.create(
+            lich_hen=lich_hen,
+            loai_nhac='PUSH',
+            thoi_gian_nhac=now,
+            noi_dung=noi_dung,
+            trang_thai='DA_GUI',
+            sent_at=now,
+            chi_tiet_phan_hoi={
+                'loai': loai,
+                'gui_boi': str(request.user.pk),
+                'tieu_de': tieu_de,
+            },
+        )
+        lich_hen.da_nhac_nho = True
+        lich_hen.ngay_nhac_nho = now
+        lich_hen.save(update_fields=['da_nhac_nho', 'ngay_nhac_nho', 'ngay_cap_nhat'])
+
+        return Response({
+            'success': True,
+            'message': 'Đã gửi thông báo cho bệnh nhân',
+            'tieu_de': tieu_de,
+            'noi_dung': noi_dung,
+        })
+
     @action(detail=False, methods=['post'], url_path='walk_in')
     def walk_in(self, request):
         """Walk-in: tạo lịch mới CHECKED_IN, STT trong ngày; BS theo tải nhẹ nhất nếu bật tự động."""
@@ -608,6 +715,7 @@ class LichHenViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='hom_nay_letan')
     def hom_nay_letan(self, request):
         """Danh sách lịch trong ngày để lễ tân thao tác nhanh (check-in, xem STT, phòng)."""
+        huy_lich_hen_qua_ngay(limit=200)
         user = request.user
         if user.vai_tro not in ['NHAN_VIEN', 'ADMIN', 'BAC_SI'] and not user.is_superuser:
             return Response({'error': 'Không có quyền xem'}, status=status.HTTP_403_FORBIDDEN)

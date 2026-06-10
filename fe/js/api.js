@@ -52,6 +52,96 @@ const CFG = {
   WS_BASE: `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`,
 };
 
+/** Gom lỗi validation API (nested details) thành chuỗi đọc được. */
+const ApiErrors = {
+  FIELD_LABELS: {
+    ten_dang_nhap: 'Tên đăng nhập',
+    email: 'Email',
+    so_dien_thoai: 'Số điện thoại',
+    password: 'Mật khẩu',
+    password2: 'Nhập lại mật khẩu',
+    ho_ten: 'Họ tên',
+    nguoi_dung: 'Tài khoản',
+    ma_bac_si: 'Mã bác sĩ',
+    ma_nhan_vien: 'Mã nhân viên',
+    ma_benh_nhan: 'Mã bệnh nhân',
+    chuyen_khoa: 'Chuyên khoa',
+    so_giay_phep: 'Số giấy phép',
+    phong_ban: 'Phòng ban',
+    ngay_sinh: 'Ngày sinh',
+    dia_chi: 'Địa chỉ',
+    gioi_tinh: 'Giới tính',
+    chuc_vu: 'Chức vụ',
+    non_field_errors: '',
+  },
+
+  _label(key) {
+    return this.FIELD_LABELS[key] || String(key).replace(/_/g, ' ');
+  },
+
+  collect(payload, prefix = '') {
+    if (payload == null) return [];
+    if (typeof payload === 'string') return [prefix ? `${prefix}: ${payload}` : payload];
+    if (Array.isArray(payload)) {
+      return payload.flatMap((item) => this.collect(item, prefix));
+    }
+    if (typeof payload === 'object') {
+      return Object.entries(payload).flatMap(([key, value]) => {
+        const label = this._label(key);
+        const nextPrefix = prefix ? `${prefix} → ${label}` : label;
+        return this.collect(value, nextPrefix);
+      });
+    }
+    return [prefix ? `${prefix}: ${String(payload)}` : String(payload)];
+  },
+
+  /** @param {{ok?:boolean,status?:number,data?:object}|object|null} res */
+  format(res, fallback = 'Thao tác thất bại') {
+    const d = res && typeof res === 'object' && 'data' in res ? res.data : res;
+    if (d == null) {
+      if (res && res.status) return `HTTP ${res.status}`;
+      return fallback;
+    }
+    if (typeof d === 'string') return d;
+    if (d.error && d.details) {
+      const details = this.collect(d.details).join('; ');
+      return details ? `${d.error}: ${details}` : String(d.error);
+    }
+    if (d.error) return String(d.error);
+    if (d.detail) {
+      return typeof d.detail === 'string' ? d.detail : this.collect(d.detail).join('; ');
+    }
+    if (d.non_field_errors) {
+      const nf = this.collect(d.non_field_errors).join('; ');
+      if (nf) return nf;
+    }
+    const collected = this.collect(d);
+    return collected.length ? collected.join('; ') : fallback;
+  },
+
+  validateMatKhau(pw) {
+    if (!pw || pw.length < 8) return 'Mật khẩu phải có ít nhất 8 ký tự';
+    if (!/[A-Z]/.test(pw)) return 'Mật khẩu cần ít nhất 1 chữ hoa';
+    if (!/\d/.test(pw)) return 'Mật khẩu cần ít nhất 1 số';
+    if (!/[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/.test(pw)) {
+      return 'Mật khẩu cần ít nhất 1 ký tự đặc biệt';
+    }
+    return null;
+  },
+
+  normalizePhoneVN(s) {
+    let d = String(s || '').replace(/\D/g, '');
+    if (d.startsWith('84') && d.length >= 11 && d[2] === '9') {
+      d = '0' + d.slice(2);
+      if (d.length > 11) d = d.slice(0, 11);
+    } else if (d.length === 9 && d[0] === '9') {
+      d = '0' + d;
+    }
+    return d;
+  },
+};
+window.ApiErrors = ApiErrors;
+
 // ══════════════════════════════════════════
 // LƯU TRỮ PHIÊN (localStorage)
 // ══════════════════════════════════════════
@@ -346,6 +436,49 @@ const Auth = {
       }
   }, 
   
+  async quenMatKhau(email) {
+    try {
+      const response = await fetch('/api/users/forgot_password/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCSRFToken(),
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify({ email }),
+      });
+      const data = await response.json().catch(() => ({}));
+      return { ok: response.ok, data };
+    } catch (error) {
+      console.error('Forgot password error:', error);
+      return { ok: false, data: { detail: 'Lỗi kết nối server' } };
+    }
+  },
+
+  async datLaiMatKhau(uid, token, newPassword, newPassword2) {
+    try {
+      const response = await fetch('/api/users/reset_password/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCSRFToken(),
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          uid,
+          token,
+          new_password: newPassword,
+          new_password2: newPassword2,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      return { ok: response.ok, data };
+    } catch (error) {
+      console.error('Reset password error:', error);
+      return { ok: false, data: { detail: 'Lỗi kết nối server' } };
+    }
+  },
+
   async dangKy(userData) {
     try {
       // Register route theo DRF router: /api/users/register/

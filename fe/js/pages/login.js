@@ -74,11 +74,74 @@ const PageDangNhap = {
                          onkeydown="if(event.key==='Enter')PageDangNhap.dangNhap()">
                   <i class="fas fa-eye input-icon-right" onclick="PageDangNhap.doiHienMatKhau('dn-mat-khau', this)"></i>
                 </div>
+                <div style="text-align:right;margin-top:6px">
+                  <a href="#" class="auth-link" onclick="event.preventDefault();PageDangNhap.doiTab('quen-mk')">Quên mật khẩu?</a>
+                </div>
               </div>
 
               <button class="btn btn-primary btn-lg btn-block mb-2" id="nut-dang-nhap"
                       onclick="PageDangNhap.dangNhap()">
                 <i class="fas fa-sign-in-alt"></i> Đăng nhập
+              </button>
+            </div>
+
+            <!-- ─── FORM QUÊN MẬT KHẨU ─── -->
+            <div id="form-quen-mk" class="d-none">
+              <h2 style="color:var(--c-navy);margin-bottom:6px">Quên mật khẩu</h2>
+              <p class="text-muted mb-3">Nhập email đã đăng ký — chúng tôi sẽ gửi liên kết đặt lại mật khẩu</p>
+
+              <div class="form-alert error" id="loi-quen-mk"></div>
+              <div class="form-alert success" id="thanh-cong-quen-mk" style="display:none"></div>
+
+              <div class="form-group">
+                <label class="form-label">Email</label>
+                <div class="form-control-icon">
+                  <i class="fas fa-envelope input-icon"></i>
+                  <input id="qm-email" type="email" class="form-control" placeholder="email@example.com"
+                         onkeydown="if(event.key==='Enter')PageDangNhap.guiYeuCauQuenMk()">
+                </div>
+              </div>
+
+              <button class="btn btn-primary btn-lg btn-block mb-2" id="nut-quen-mk"
+                      onclick="PageDangNhap.guiYeuCauQuenMk()">
+                <i class="fas fa-paper-plane"></i> Gửi liên kết
+              </button>
+              <button type="button" class="btn btn-ghost btn-block" onclick="PageDangNhap.doiTab('dang-nhap')">
+                <i class="fas fa-arrow-left"></i> Quay lại đăng nhập
+              </button>
+            </div>
+
+            <!-- ─── FORM ĐẶT LẠI MẬT KHẨU ─── -->
+            <div id="form-dat-lai-mk" class="d-none">
+              <h2 style="color:var(--c-navy);margin-bottom:6px">Đặt lại mật khẩu</h2>
+              <p class="text-muted mb-3">Nhập mật khẩu mới cho tài khoản của bạn</p>
+
+              <div class="form-alert error" id="loi-dat-lai-mk"></div>
+
+              <div class="form-group">
+                <label class="form-label">Mật khẩu mới *</label>
+                <div class="form-control-icon">
+                  <i class="fas fa-lock input-icon"></i>
+                  <input id="dl-mat-khau" type="password" class="form-control" placeholder="••••••••">
+                  <i class="fas fa-eye input-icon-right" onclick="PageDangNhap.doiHienMatKhau('dl-mat-khau', this)"></i>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Xác nhận mật khẩu *</label>
+                <div class="form-control-icon">
+                  <i class="fas fa-lock input-icon"></i>
+                  <input id="dl-mat-khau2" type="password" class="form-control" placeholder="••••••••"
+                         onkeydown="if(event.key==='Enter')PageDangNhap.datLaiMatKhau()">
+                  <i class="fas fa-eye input-icon-right" onclick="PageDangNhap.doiHienMatKhau('dl-mat-khau2', this)"></i>
+                </div>
+              </div>
+
+              <button class="btn btn-primary btn-lg btn-block mb-2" id="nut-dat-lai-mk"
+                      onclick="PageDangNhap.datLaiMatKhau()">
+                <i class="fas fa-key"></i> Đặt lại mật khẩu
+              </button>
+              <button type="button" class="btn btn-ghost btn-block" onclick="PageDangNhap.doiTab('dang-nhap')">
+                <i class="fas fa-arrow-left"></i> Quay lại đăng nhập
               </button>
             </div>
 
@@ -159,8 +222,16 @@ const PageDangNhap = {
 
     if (window.UIEnhance) window.UIEnhance.bindThemeToggles();
 
-    // Focus field đầu tiên
-    setTimeout(() => document.getElementById('dn-tai-khoan')?.focus(), 100);
+    const params = new URLSearchParams(window.location.search);
+    const resetUid = params.get('reset');
+    const resetToken = params.get('token');
+    if (resetUid && resetToken) {
+      this._resetUid = resetUid;
+      this._resetToken = resetToken;
+      setTimeout(() => this.doiTab('dat-lai-mk'), 50);
+    } else {
+      setTimeout(() => document.getElementById('dn-tai-khoan')?.focus(), 100);
+    }
   },
 
   doiTab(tab) {
@@ -168,11 +239,26 @@ const PageDangNhap = {
     const tabDangKy = document.getElementById('tab-dang-ky');
     const formDangNhap = document.getElementById('form-dang-nhap');
     const formDangKy = document.getElementById('form-dang-ky');
-    
+    const formQuenMk = document.getElementById('form-quen-mk');
+    const formDatLaiMk = document.getElementById('form-dat-lai-mk');
+    const authTabs = document.querySelector('.auth-tabs');
+
+    const showTabs = tab === 'dang-nhap' || tab === 'dang-ky';
+    if (authTabs) authTabs.style.display = showTabs ? '' : 'none';
+
     if (tabDangNhap) tabDangNhap.classList.toggle('active', tab === 'dang-nhap');
     if (tabDangKy) tabDangKy.classList.toggle('active', tab === 'dang-ky');
     if (formDangNhap) formDangNhap.classList.toggle('d-none', tab !== 'dang-nhap');
     if (formDangKy) formDangKy.classList.toggle('d-none', tab !== 'dang-ky');
+    if (formQuenMk) formQuenMk.classList.toggle('d-none', tab !== 'quen-mk');
+    if (formDatLaiMk) formDatLaiMk.classList.toggle('d-none', tab !== 'dat-lai-mk');
+
+    if (tab === 'dang-nhap' && window.history.replaceState) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('reset');
+      url.searchParams.delete('token');
+      window.history.replaceState({}, '', url.pathname + url.search);
+    }
   },
 
   doiHienMatKhau(inputId, icon) {
@@ -325,6 +411,100 @@ const PageDangNhap = {
           (Array.isArray(data.ten_dang_nhap) ? data.ten_dang_nhap[0] : null)
         : null;
     this._hienLoi('loi-dang-nhap', flat || 'Sai tên đăng nhập hoặc mật khẩu');
+  },
+
+  async guiYeuCauQuenMk() {
+    this._anLoi('loi-quen-mk');
+    const successEl = document.getElementById('thanh-cong-quen-mk');
+    if (successEl) successEl.style.display = 'none';
+
+    const email = document.getElementById('qm-email')?.value.trim();
+    if (!email) {
+      this._hienLoi('loi-quen-mk', 'Vui lòng nhập email');
+      return;
+    }
+
+    const btn = document.getElementById('nut-quen-mk');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang gửi...';
+    }
+
+    const { ok, data } = await Auth.quenMatKhau(email);
+
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-paper-plane"></i> Gửi liên kết';
+    }
+
+    if (ok) {
+      const msg = data?.message || 'Đã gửi hướng dẫn đến email (nếu tồn tại trong hệ thống).';
+      if (successEl) {
+        successEl.textContent = msg;
+        successEl.style.display = 'block';
+      }
+      if (data?.reset_url) {
+        console.info('DEV reset link:', data.reset_url);
+      }
+      return;
+    }
+
+    const err =
+      data?.email?.[0] ||
+      data?.detail ||
+      (typeof data === 'object' ? Object.values(data).flat()[0] : null);
+    this._hienLoi('loi-quen-mk', err || 'Không gửi được yêu cầu');
+  },
+
+  async datLaiMatKhau() {
+    this._anLoi('loi-dat-lai-mk');
+
+    const mk = document.getElementById('dl-mat-khau')?.value || '';
+    const mk2 = document.getElementById('dl-mat-khau2')?.value || '';
+
+    if (!mk || !mk2) {
+      this._hienLoi('loi-dat-lai-mk', 'Vui lòng nhập và xác nhận mật khẩu mới');
+      return;
+    }
+    if (mk.length < 8) {
+      this._hienLoi('loi-dat-lai-mk', 'Mật khẩu tối thiểu 8 ký tự');
+      return;
+    }
+    if (!/[A-Z]/.test(mk) || !/\d/.test(mk) || !/[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/.test(mk)) {
+      this._hienLoi('loi-dat-lai-mk', 'Mật khẩu cần ít nhất 1 chữ hoa, 1 số và 1 ký tự đặc biệt');
+      return;
+    }
+    if (mk !== mk2) {
+      this._hienLoi('loi-dat-lai-mk', 'Mật khẩu xác nhận không khớp');
+      return;
+    }
+
+    const btn = document.getElementById('nut-dat-lai-mk');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang xử lý...';
+    }
+
+    const { ok, data } = await Auth.datLaiMatKhau(this._resetUid, this._resetToken, mk, mk2);
+
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-key"></i> Đặt lại mật khẩu';
+    }
+
+    if (ok) {
+      Toast.ok('Thành công', data?.message || 'Đặt lại mật khẩu thành công');
+      this._resetUid = null;
+      this._resetToken = null;
+      this.doiTab('dang-nhap');
+      return;
+    }
+
+    const err =
+      data?.detail ||
+      data?.new_password?.[0] ||
+      (typeof data === 'object' ? Object.values(data).flat()[0] : null);
+    this._hienLoi('loi-dat-lai-mk', err || 'Không đặt lại được mật khẩu');
   },
 };
 

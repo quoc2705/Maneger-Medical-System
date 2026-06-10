@@ -1773,6 +1773,42 @@ const PageBacSiDashboard = {
     return ymd && ymd < this._homNayYMD();
   },
 
+  /** Ca đã qua khung giờ (khớp backend: SANG <12h, CHIEU <18h, TOI <22h). */
+  _caLamDaQua(ymd, ca) {
+    const today = this._homNayYMD();
+    if (!ymd || ymd < today) return true;
+    if (ymd > today) return false;
+    const h = new Date().getHours();
+    if (ca === 'SANG') return h >= 12;
+    if (ca === 'CHIEU') return h >= 18;
+    if (ca === 'TOI') return h >= 22;
+    return false;
+  },
+
+  _tenCaLam(ca) {
+    return { SANG: 'Ca sáng', CHIEU: 'Ca chiều', TOI: 'Ca tối' }[ca] || ca;
+  },
+
+  _capNhatCaLlvKhaDung() {
+    const ngay = document.getElementById('bs-llv-ngay')?.value || this._homNayYMD();
+    [
+      ['bs-llv-sang', 'SANG'],
+      ['bs-llv-chieu', 'CHIEU'],
+      ['bs-llv-toi', 'TOI'],
+    ].forEach(([id, ca]) => {
+      const cb = document.getElementById(id);
+      const card = cb?.closest('.bs-llv-ca-card');
+      if (!cb) return;
+      const qua = this._caLamDaQua(ngay, ca);
+      cb.disabled = qua;
+      if (qua) cb.checked = false;
+      if (card) {
+        card.classList.toggle('bs-llv-ca-card--disabled', qua);
+        card.title = qua ? `${this._tenCaLam(ca)} đã qua, không thể đăng ký` : '';
+      }
+    });
+  },
+
   _apDungMinNgayLlv() {
     const today = this._homNayYMD();
     const el = document.getElementById('bs-llv-ngay');
@@ -1783,6 +1819,7 @@ const PageBacSiDashboard = {
       el.dataset.minBound = '1';
       el.addEventListener('change', () => this._kiemTraNgayLlvInput());
     }
+    this._capNhatCaLlvKhaDung();
   },
 
   _kiemTraNgayLlvInput() {
@@ -1793,6 +1830,7 @@ const PageBacSiDashboard = {
       el.value = today;
       Toast.loi('Ngày không hợp lệ', 'Không chọn ngày trong quá khứ', 'error');
     }
+    this._capNhatCaLlvKhaDung();
   },
 
   _chonNgayLlvPreset(offsetDays) {
@@ -1800,6 +1838,7 @@ const PageBacSiDashboard = {
     d.setDate(d.getDate() + Math.max(0, offsetDays || 0));
     const el = document.getElementById('bs-llv-ngay');
     if (el) el.value = this._formatDateYMD(d);
+    this._capNhatCaLlvKhaDung();
     const ymd = this._formatDateYMD(d);
     if (this._llvCalYear != null) {
       this._llvCalYear = d.getFullYear();
@@ -1859,6 +1898,7 @@ const PageBacSiDashboard = {
     this._llvCalSelected = this._formatDateYMD(t);
     const el = document.getElementById('bs-llv-ngay');
     if (el) el.value = this._llvCalSelected;
+    this._capNhatCaLlvKhaDung();
     this._renderLlvCalendar();
   },
 
@@ -1868,6 +1908,7 @@ const PageBacSiDashboard = {
     const isPast = this._laNgayQuaKhu(ymd);
     const el = document.getElementById('bs-llv-ngay');
     if (el && !isPast) el.value = ymd;
+    this._capNhatCaLlvKhaDung();
     const p = ymd.split('-');
     if (p.length === 3) {
       this._llvCalYear = parseInt(p[0], 10);
@@ -2180,6 +2221,14 @@ const PageBacSiDashboard = {
     if (this._laNgayQuaKhu(ngay)) {
       return Toast.loi('Ngày không hợp lệ', 'Không đăng ký ca cho ngày trong quá khứ', 'error');
     }
+    const caQua = ca.filter((c) => this._caLamDaQua(ngay, c));
+    if (caQua.length) {
+      return Toast.loi(
+        'Ca đã qua',
+        `Không đăng ký ca đã kết thúc: ${caQua.map((c) => this._tenCaLam(c)).join(', ')}`,
+        'error'
+      );
+    }
     const ghiChu = (document.getElementById('bs-llv-ghi-chu')?.value || '').trim();
     const res = await Http.tao('/doctor-schedule/dang_ky_nhieu/', {
       ngay_lam: ngay,
@@ -2187,7 +2236,21 @@ const PageBacSiDashboard = {
       ghi_chu: ghiChu,
     });
     if (!res.ok) {
-      const err = res.data?.error || (res.data?.errors && JSON.stringify(res.data.errors)) || this._msgApiLoi(res);
+      let err = res.data?.error;
+      if (!err && res.data?.errors?.length) {
+        const parts = res.data.errors.flatMap((item) => {
+          if (typeof item === 'object' && item) {
+            return Object.entries(item).flatMap(([caKey, val]) => {
+              const msg = val?.ca_lam?.[0] || val?.ngay_lam?.[0];
+              return msg ? [`${this._tenCaLam(caKey)}: ${msg}`] : [];
+            });
+          }
+          return [];
+        });
+        err = parts.length ? parts.join('; ') : JSON.stringify(res.data.errors);
+      }
+      if (!err && window.ApiErrors) err = ApiErrors.format(res);
+      if (!err) err = this._msgApiLoi(res);
       return Toast.loi('Không đăng ký được', err, 'error');
     }
     Toast.hien('Đã đăng ký ca', `${ca.length} ca ngày ${ngay}`, 'success');

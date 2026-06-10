@@ -1078,6 +1078,7 @@ const AdminDashboard = {
                 <div class="form-group">
                     <label>Mật khẩu *</label>
                     <input type="password" id="patient-password" class="form-control" placeholder="••••••••">
+                    <small class="text-muted">≥8 ký tự, 1 chữ hoa, 1 số, 1 ký tự đặc biệt</small>
                 </div>
             </div>
             <div class="form-row">
@@ -1115,7 +1116,7 @@ const AdminDashboard = {
             const name = document.getElementById('patient-name').value.trim();
             const username = document.getElementById('patient-username').value.trim();
             const email = document.getElementById('patient-email').value.trim();
-            const phone = document.getElementById('patient-phone').value.trim();
+            const phone = this._normalizePhoneVN(document.getElementById('patient-phone').value);
             const password = document.getElementById('patient-password').value;
             const birthday = document.getElementById('patient-birthday').value;
             const gender = document.getElementById('patient-gender').value;
@@ -3242,6 +3243,7 @@ const AdminDashboard = {
             <div class="form-group">
                 <label>Mật khẩu *</label>
                 <input type="password" id="doctor-password" class="form-control" placeholder="••••••••">
+                <small class="text-muted">≥8 ký tự, 1 chữ hoa, 1 số, 1 ký tự đặc biệt. Số giấy phép không được trùng.</small>
             </div>
             <div class="form-row">
                 <div class="form-group">
@@ -3283,20 +3285,20 @@ const AdminDashboard = {
             const name = document.getElementById('doctor-name').value.trim();
             const username = document.getElementById('doctor-username').value.trim();
             const email = document.getElementById('doctor-email').value.trim();
-            const phone = document.getElementById('doctor-phone').value.trim();
+            const phone = this._normalizePhoneVN(document.getElementById('doctor-phone').value);
             const password = document.getElementById('doctor-password').value;
             const specialty = document.getElementById('doctor-specialty').value.trim();
             const license = document.getElementById('doctor-license').value.trim();
+            const chucVu = document.getElementById('doctor-position').value;
 
             if (!name || !username || !email || !phone || !password || !specialty || !license) {
                 return this._reportCrudError({ error: 'Vui lòng nhập đầy đủ thông tin bắt buộc' });
             }
-            if (password.length < 8) {
-                return this._reportCrudError({ error: 'Mật khẩu phải có ít nhất 8 ký tự' });
+            if (username.length < 3) {
+                return this._reportCrudError({ error: 'Tên đăng nhập phải có ít nhất 3 ký tự' });
             }
-            if (!/[A-Z]/.test(password) || !/\d/.test(password) || !/[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/.test(password)) {
-                return this._reportCrudError({ error: 'Mật khẩu cần có ít nhất 1 chữ hoa, 1 số và 1 ký tự đặc biệt' });
-            }
+            const pwErr = window.ApiErrors ? ApiErrors.validateMatKhau(password) : null;
+            if (pwErr) return this._reportCrudError({ error: pwErr });
 
             const data = {
                 nguoi_dung: {
@@ -3312,8 +3314,8 @@ const AdminDashboard = {
                 chuyen_khoa: specialty,
                 so_giay_phep: license,
                 trinh_do: document.getElementById('doctor-degree').value,
-                chuc_vu: document.getElementById('doctor-position').value
             };
+            if (chucVu) data.chuc_vu = chucVu;
             
             const result = await this.apiPost('/admin/bac-si/', data, { silent: true });
             if (this._isCrudOk(result)) {
@@ -3367,6 +3369,7 @@ const AdminDashboard = {
             <div class="form-group">
                 <label>Mật khẩu *</label>
                 <input type="password" id="staff-password" class="form-control" placeholder="••••••••">
+                <small class="text-muted">≥8 ký tự, 1 chữ hoa, 1 số, 1 ký tự đặc biệt</small>
             </div>
             <div class="form-group">
                 <label>Nhập lại mật khẩu *</label>
@@ -3432,13 +3435,11 @@ const AdminDashboard = {
             if (data.nguoi_dung.password !== data.nguoi_dung.password2) {
                 return this._reportCrudError({ error: 'Mật khẩu nhập lại không khớp' });
             }
-            if (data.nguoi_dung.password.length < 8) {
-                return this._reportCrudError({ error: 'Mật khẩu phải có ít nhất 8 ký tự' });
+            if (data.nguoi_dung.ten_dang_nhap.length < 3) {
+                return this._reportCrudError({ error: 'Tên đăng nhập phải có ít nhất 3 ký tự' });
             }
-            if (!/[A-Z]/.test(data.nguoi_dung.password) || !/\d/.test(data.nguoi_dung.password) ||
-                !/[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/.test(data.nguoi_dung.password)) {
-                return this._reportCrudError({ error: 'Mật khẩu cần có ít nhất 1 chữ hoa, 1 số và 1 ký tự đặc biệt' });
-            }
+            const pwErrNv = window.ApiErrors ? ApiErrors.validateMatKhau(data.nguoi_dung.password) : null;
+            if (pwErrNv) return this._reportCrudError({ error: pwErrNv });
             
             const result = await this.apiPost('/admin/nhan-vien/', data, { silent: true });
             if (this._isCrudOk(result)) {
