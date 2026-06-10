@@ -7,7 +7,6 @@ const PageBenhNhanDashboard = {
       'ho-so': 'hs',
       'lich-hen': 'lh',
       'dat-lich': 'lh',
-      'don-thuoc': 'dt',
       'mua-thuoc': 'mt',
       'don-hang': 'dh',
     };
@@ -26,7 +25,6 @@ const PageBenhNhanDashboard = {
       <button type="button" class="nav-item" data-bn-nav="dash" onclick="PageBenhNhanDashboard.chuyenTrang('dashboard')"><i class="fas fa-chart-line"></i><span>Tổng quan</span></button>
       <button type="button" class="nav-item" data-bn-nav="hs" onclick="PageBenhNhanDashboard.chuyenTrang('ho-so')"><i class="fas fa-id-card"></i><span>Hồ sơ cá nhân</span></button>
       <button type="button" class="nav-item" data-bn-nav="lh" onclick="PageBenhNhanDashboard.chuyenTrang('lich-hen')"><i class="fas fa-calendar-check"></i><span>Lịch hẹn</span></button>
-      <button type="button" class="nav-item" data-bn-nav="dt" onclick="PageBenhNhanDashboard.chuyenTrang('don-thuoc')"><i class="fas fa-prescription-bottle"></i><span>Đơn thuốc</span></button>
       <button type="button" class="nav-item" data-bn-nav="mt" onclick="PageBenhNhanDashboard.chuyenTrang('mua-thuoc')"><i class="fas fa-pills"></i><span>Mua thuốc</span></button>
       <button type="button" class="nav-item" data-bn-nav="dh" onclick="PageBenhNhanDashboard.chuyenTrang('don-hang')"><i class="fas fa-box"></i><span>Đơn hàng của tôi</span></button>`;
     const notifBtn = `
@@ -80,11 +78,6 @@ const PageBenhNhanDashboard = {
     if ((trang === 'lich-hen' || trang === 'dat-lich') && window.PageLichHenBenhNhan?.render) {
       await window.PageLichHenBenhNhan.render({ benhNhanId: this._benhNhanId, hostElementId: 'benh-nhan-main-content' });
       this._setNavActive('lich-hen');
-      return;
-    }
-    if (trang === 'don-thuoc' && window.PageDonThuocBenhNhan?.render) {
-      await window.PageDonThuocBenhNhan.render({ benhNhanId: this._benhNhanId, hostElementId: 'benh-nhan-main-content' });
-      this._setNavActive('don-thuoc');
       return;
     }
     if (trang === 'don-hang') {

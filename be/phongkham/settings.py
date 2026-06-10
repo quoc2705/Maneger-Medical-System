@@ -4,7 +4,7 @@ from datetime import timedelta
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BASE_DIR / ".env")
+load_dotenv(BASE_DIR / ".env", override=True)
 
 FE_DIR = BASE_DIR.parent / "fe"
 
@@ -12,6 +12,10 @@ FE_DIR = BASE_DIR.parent / "fe"
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-your-secret-key-here-change-in-production')
 
 DEBUG = os.environ.get('DJANGO_DEBUG', 'False').lower() == 'true'
+
+# Ngrok / reverse proxy — Django nhận đúng HTTPS (tránh form POST bị cảnh báo "không an toàn")
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+USE_X_FORWARDED_HOST = True
 
 # ALLOWED_HOSTS = [h.strip() for h in os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if h.strip()]
 ALLOWED_HOSTS = ['*']
@@ -219,6 +223,8 @@ VNPAY = {
     ),
     'RETURN_URL': _vnp_return,
     'IPN_URL': _vnp_ipn,
+    # Môi trường test mẫu: trang mock local, không cần HASH_SECRET khớp VNPay
+    'TEST_MODE': os.environ.get('VNPAY_TEST_MODE', 'false').lower() == 'true',
 }
 
 # Email xác nhận thanh toán VNPay (bệnh nhân mua online)

@@ -1,6 +1,7 @@
 import logging
+import re
 from django.conf import settings
-from django.shortcuts import render, get_object_or_404
+from django.shortcuts import render, get_object_or_404, redirect
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.core.paginator import Paginator
@@ -26,8 +27,11 @@ from benhan.revenue_utils import (
 from .revenue_utils import loc_don_hang_theo_ky_doanh
 from nguoidung.roles import la_nhan_vien_ban_thuoc
 from .vnpay_utils import (
+    build_mock_return_query,
     build_payment_url,
+    is_vnpay_mock_payment,
     is_vnpay_portal_test_ipn,
+    is_vnpay_test_mode,
     verify_vnpay_signature,
     vnpay_da_cau_hinh,
 )
@@ -1631,12 +1635,13 @@ def vnpay_tao_url(request, don_hang_id):
     if hasattr(don_hang, 'thanh_toan'):
         return JsonResponse({'success': False, 'error': 'Đơn đã thanh toán'}, status=400)
     if not vnpay_da_cau_hinh():
+        err = (
+            'Chưa cấu hình VNPAY_RETURN_URL (hoặc SITE_URL) cho VNPAY_TEST_MODE.'
+            if is_vnpay_test_mode()
+            else 'Chưa cấu hình VNPay trên server (VNPAY_TMN_CODE, VNPAY_HASH_SECRET, VNPAY_RETURN_URL).'
+        )
         return JsonResponse(
-            {
-                'success': False,
-                'error': 'Chưa cấu hình VNPay trên server (VNPAY_TMN_CODE, VNPAY_HASH_SECRET, VNPAY_RETURN_URL).',
-                'configured': False,
-            },
+            {'success': False, 'error': err, 'configured': False},
             status=400,
         )
     ip = (
@@ -1670,61 +1675,27 @@ def vnpay_tao_url(request, don_hang_id):
     return JsonResponse(
         {
             'success': True,
-            'data': {'payment_url': url, 'txn_ref': don_hang.ma_don_hang, 'amount': float(don_hang.tong_tien)},
+            'data': {
+                'payment_url': url,
+                'txn_ref': don_hang.ma_don_hang,
+                'amount': float(don_hang.tong_tien),
+                'test_mode': is_vnpay_test_mode(),
+            },
         }
     )
 
 
-@csrf_exempt
-def vnpay_ipn(request):
-    """IPN VNPay — xác nhận thanh toán (không cần đăng nhập). Cổng có thể gửi GET hoặc POST."""
-    flat = {}
-    for k in request.GET:
-        flat[k] = request.GET.get(k)
-    for k in request.POST:
-        flat[k] = request.POST.get(k)
-    qs = request.META.get('QUERY_STRING', '') or ''
-    if is_vnpay_portal_test_ipn(flat):
-        logger_dh.info('VNPay IPN: Test call IPN cổng merchant (hash_test) — URL OK')
-        return JsonResponse({'RspCode': '00', 'Message': 'Confirm Success'}, status=200)
-    ok, msg = verify_vnpay_signature(flat, query_string=qs)
-    if not ok:
-        cfg_tmn = (getattr(settings, 'VNPAY', None) or {}).get('TMN_CODE', '')
-        req_tmn = flat.get('vnp_TmnCode', '')
-        logger_dh.warning(
-            'VNPay IPN: xác minh chữ ký thất bại: %s | keys=%s | tmn_env=%s tmn_req=%s | txn=%s',
-            msg,
-            list(flat.keys()),
-            cfg_tmn,
-            req_tmn,
-            flat.get('vnp_TxnRef', ''),
-        )
-        if cfg_tmn and req_tmn and cfg_tmn != req_tmn:
-            msg = f'Sai chữ ký — TMN .env ({cfg_tmn}) khác TMN IPN ({req_tmn}). Kiểm tra VNPAY_HASH_SECRET trên cổng merchant.'
-        return JsonResponse({'RspCode': '97', 'Message': msg or 'Invalid'}, status=200)
-    rsp = flat.get('vnp_ResponseCode') or ''
-    status_txn = flat.get('vnp_TransactionStatus') or ''
-    txn_ref = flat.get('vnp_TxnRef') or ''
-    ma_gd = flat.get('vnp_TransactionNo') or ''
-    amount_raw = flat.get('vnp_Amount') or '0'
-    try:
-        amount_vnd = int(amount_raw) / 100.0
-    except ValueError:
-        amount_vnd = 0
-
-    # Test IPN cổng merchant có thể thiếu vnp_TransactionStatus
-    if rsp != '00' or (status_txn and status_txn != '00'):
-        return JsonResponse({'RspCode': '00', 'Message': 'Ghi nhận — giao dịch không thành công'}, status=200)
-
+def _vnpay_gan_thanh_cong_don(txn_ref, amount_vnd, ma_gd):
+    """Ghi nhận thanh toán VNPay thành công. Trả (rsp_code, message)."""
     with transaction.atomic():
         try:
             don_hang = DonHang.objects.select_for_update().get(ma_don_hang=txn_ref)
         except DonHang.DoesNotExist:
-            return JsonResponse({'RspCode': '01', 'Message': 'Order not found'}, status=200)
+            return '01', 'Order not found'
         if hasattr(don_hang, 'thanh_toan'):
-            return JsonResponse({'RspCode': '00', 'Message': 'Confirm Success'}, status=200)
+            return '00', 'Confirm Success'
         if abs(float(don_hang.tong_tien) - float(amount_vnd)) > 0.01:
-            return JsonResponse({'RspCode': '04', 'Message': 'Invalid amount'}, status=200)
+            return '04', 'Invalid amount'
         trang_thai_cu = don_hang.trang_thai
         ThanhToan.objects.create(
             don_hang=don_hang,
@@ -1757,7 +1728,190 @@ def vnpay_ipn(request):
             trang_moi,
             ma_gd,
         )
-    return JsonResponse({'RspCode': '00', 'Message': 'Confirm Success'}, status=200)
+    return '00', 'Confirm Success'
+
+
+def _vnpay_mock_parse_amount(amount_raw):
+    try:
+        amount_cents = int(amount_raw)
+    except (TypeError, ValueError):
+        return None, None
+    if amount_cents <= 0:
+        return None, None
+    return amount_cents, amount_cents / 100.0
+
+
+def _vnpay_mock_context(request, *, txn_ref, amount_cents, order_info, error=None, form=None):
+    amount_vnd = amount_cents / 100.0
+    form = form or {}
+    # URL tương đối — giữ cùng giao thức HTTPS với trang hiện tại (tránh cảnh báo trình duyệt)
+    confirm_url = '/api/don-hang/vnpay-mock/confirm/'
+    from urllib.parse import urlencode
+
+    cancel_qs = urlencode(
+        {'txn_ref': txn_ref, 'amount': amount_cents, 'action': 'cancel'},
+    )
+    cancel_url = f'{confirm_url}?{cancel_qs}'
+    return {
+        'txn_ref': txn_ref,
+        'order_info': order_info,
+        'amount_cents': amount_cents,
+        'amount_display': f'{amount_vnd:,.0f}',
+        'confirm_url': confirm_url,
+        'cancel_url': cancel_url,
+        'error': error,
+        'so_the': form.get('so_the', ''),
+        'ten_chu_the': form.get('ten_chu_the', ''),
+        'ngay_het_han': form.get('ngay_het_han', ''),
+        'otp': form.get('otp', ''),
+    }
+
+
+def _vnpay_mock_validate_card(so_the, ten_chu_the, otp):
+    digits = re.sub(r'\D', '', so_the or '')
+    if len(digits) < 8:
+        return 'Vui lòng nhập số thẻ / số tài khoản (ít nhất 8 chữ số).'
+    name = (ten_chu_the or '').strip()
+    if len(name) < 2:
+        return 'Vui lòng nhập tên chủ thẻ.'
+    otp_digits = re.sub(r'\D', '', otp or '')
+    if otp and len(otp_digits) < 4:
+        return 'Mã OTP không hợp lệ (test: 123456).'
+    return None
+
+
+@csrf_exempt
+def vnpay_mock(request):
+    """Trang nhập thông tin ngân hàng mẫu (VNPAY_TEST_MODE)."""
+    if not is_vnpay_test_mode():
+        return HttpResponse('VNPAY_TEST_MODE chưa bật', status=404)
+    txn_ref = (request.GET.get('txn_ref') or '').strip()
+    amount_raw = (request.GET.get('amount') or '0').strip()
+    order_info = (request.GET.get('order_info') or '').strip() or txn_ref
+    amount_cents, _ = _vnpay_mock_parse_amount(amount_raw)
+    if not txn_ref or amount_cents is None:
+        return HttpResponse('Thiếu txn_ref hoặc amount không hợp lệ', status=400)
+    return render(
+        request,
+        'vnpay_mock.html',
+        _vnpay_mock_context(request, txn_ref=txn_ref, amount_cents=amount_cents, order_info=order_info),
+    )
+
+
+@csrf_exempt
+def vnpay_mock_confirm(request):
+    """Xác nhận sau khi nhập thẻ → ghi thanh toán → redirect SPA."""
+    if not is_vnpay_test_mode():
+        return HttpResponse('VNPAY_TEST_MODE chưa bật', status=404)
+
+    src = request.POST if request.method == 'POST' else request.GET
+    txn_ref = (src.get('txn_ref') or '').strip()
+    amount_raw = (src.get('amount') or '0').strip()
+    order_info = (src.get('order_info') or '').strip() or txn_ref
+    action = (src.get('action') or 'success').strip().lower()
+    form = {
+        'so_the': (src.get('so_the') or '').strip(),
+        'ten_chu_the': (src.get('ten_chu_the') or '').strip(),
+        'ngay_het_han': (src.get('ngay_het_han') or '').strip(),
+        'otp': (src.get('otp') or '').strip(),
+    }
+
+    amount_cents, amount_vnd = _vnpay_mock_parse_amount(amount_raw)
+    if not txn_ref or amount_cents is None:
+        return HttpResponse('Thiếu txn_ref hoặc amount không hợp lệ', status=400)
+
+    cfg = getattr(settings, 'VNPAY', None) or {}
+    return_url = (cfg.get('RETURN_URL') or '').strip()
+    if not return_url:
+        return HttpResponse('Thiếu VNPAY_RETURN_URL', status=500)
+
+    success = action == 'success'
+    if success and request.method == 'POST':
+        err = _vnpay_mock_validate_card(form['so_the'], form['ten_chu_the'], form['otp'])
+        if err:
+            return render(
+                request,
+                'vnpay_mock.html',
+                _vnpay_mock_context(
+                    request,
+                    txn_ref=txn_ref,
+                    amount_cents=amount_cents,
+                    order_info=order_info,
+                    error=err,
+                    form=form,
+                ),
+            )
+
+    qs = build_mock_return_query(txn_ref, amount_cents, success=success)
+    if success:
+        from urllib.parse import parse_qs
+
+        flat = {k: v[0] for k, v in parse_qs(qs).items()}
+        ma_gd = flat.get('vnp_TransactionNo') or 'MOCK'
+        code, msg = _vnpay_gan_thanh_cong_don(txn_ref, amount_vnd, ma_gd)
+        if code != '00':
+            return render(
+                request,
+                'vnpay_mock.html',
+                _vnpay_mock_context(
+                    request,
+                    txn_ref=txn_ref,
+                    amount_cents=amount_cents,
+                    order_info=order_info,
+                    error=f'Không ghi nhận thanh toán: {msg}',
+                    form=form,
+                ),
+            )
+
+    sep = '&' if '?' in return_url else '?'
+    return redirect(f'{return_url}{sep}{qs}')
+
+
+@csrf_exempt
+def vnpay_ipn(request):
+    """IPN VNPay — xác nhận thanh toán (không cần đăng nhập). Cổng có thể gửi GET hoặc POST."""
+    flat = {}
+    for k in request.GET:
+        flat[k] = request.GET.get(k)
+    for k in request.POST:
+        flat[k] = request.POST.get(k)
+    qs = request.META.get('QUERY_STRING', '') or ''
+    if is_vnpay_portal_test_ipn(flat):
+        logger_dh.info('VNPay IPN: Test call IPN cổng merchant (hash_test) — URL OK')
+        return JsonResponse({'RspCode': '00', 'Message': 'Confirm Success'}, status=200)
+    if is_vnpay_mock_payment(flat):
+        logger_dh.info('VNPay IPN: mock test (bỏ qua chữ ký)')
+    ok, msg = verify_vnpay_signature(flat, query_string=qs)
+    if not ok:
+        cfg_tmn = (getattr(settings, 'VNPAY', None) or {}).get('TMN_CODE', '')
+        req_tmn = flat.get('vnp_TmnCode', '')
+        logger_dh.warning(
+            'VNPay IPN: xác minh chữ ký thất bại: %s | keys=%s | tmn_env=%s tmn_req=%s | txn=%s',
+            msg,
+            list(flat.keys()),
+            cfg_tmn,
+            req_tmn,
+            flat.get('vnp_TxnRef', ''),
+        )
+        if cfg_tmn and req_tmn and cfg_tmn != req_tmn:
+            msg = f'Sai chữ ký — TMN .env ({cfg_tmn}) khác TMN IPN ({req_tmn}). Kiểm tra VNPAY_HASH_SECRET trên cổng merchant.'
+        return JsonResponse({'RspCode': '97', 'Message': msg or 'Invalid'}, status=200)
+    rsp = flat.get('vnp_ResponseCode') or ''
+    status_txn = flat.get('vnp_TransactionStatus') or ''
+    txn_ref = flat.get('vnp_TxnRef') or ''
+    ma_gd = flat.get('vnp_TransactionNo') or ''
+    amount_raw = flat.get('vnp_Amount') or '0'
+    try:
+        amount_vnd = int(amount_raw) / 100.0
+    except ValueError:
+        amount_vnd = 0
+
+    # Test IPN cổng merchant có thể thiếu vnp_TransactionStatus
+    if rsp != '00' or (status_txn and status_txn != '00'):
+        return JsonResponse({'RspCode': '00', 'Message': 'Ghi nhận — giao dịch không thành công'}, status=200)
+
+    code, ipn_msg = _vnpay_gan_thanh_cong_don(txn_ref, amount_vnd, ma_gd)
+    return JsonResponse({'RspCode': code, 'Message': ipn_msg}, status=200)
 
 
 def vnpay_return(request):

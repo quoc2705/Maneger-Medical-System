@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VNPay — Thanh toán</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: #f0f4f8;
+      color: #222;
+      min-height: 100vh;
+    }
+    .vnp-header {
+      background: linear-gradient(135deg, #005baa 0%, #003d73 100%);
+      color: #fff;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 2px 8px #0002;
+    }
+    .vnp-logo {
+      font-weight: 800;
+      font-size: 1.35rem;
+      letter-spacing: -0.5px;
+    }
+    .vnp-logo span { color: #ffc107; }
+    .vnp-badge {
+      margin-left: auto;
+      font-size: 11px;
+      background: #ffffff22;
+      padding: 4px 10px;
+      border-radius: 20px;
+    }
+    .wrap {
+      max-width: 480px;
+      margin: 0 auto;
+      padding: 20px 16px 40px;
+    }
+    .order-box {
+      background: #fff;
+      border-radius: 10px;
+      padding: 16px 18px;
+      margin-bottom: 16px;
+      border: 1px solid #e2e8f0;
+    }
+    .order-box h2 {
+      margin: 0 0 12px;
+      font-size: 15px;
+      color: #005baa;
+      font-weight: 600;
+    }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 14px;
+      padding: 6px 0;
+      border-bottom: 1px dashed #eee;
+    }
+    .row:last-child { border-bottom: none; }
+    .row .label { color: #64748b; }
+    .row .value { font-weight: 600; text-align: right; max-width: 60%; word-break: break-all; }
+    .amount { color: #c62828; font-size: 1.15rem; }
+    .bank-card {
+      background: #fff;
+      border-radius: 10px;
+      border: 1px solid #e2e8f0;
+      overflow: hidden;
+    }
+    .bank-head {
+      background: #f8fafc;
+      padding: 12px 18px;
+      border-bottom: 1px solid #e2e8f0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .bank-icon {
+      width: 40px;
+      height: 40px;
+      background: #0066b3;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: 700;
+      font-size: 11px;
+    }
+    .bank-head strong { font-size: 14px; }
+    .bank-head small { display: block; color: #64748b; font-size: 12px; margin-top: 2px; }
+    .form-body { padding: 18px; }
+    .field { margin-bottom: 16px; }
+    .field label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: #334155;
+    }
+    .field input {
+      width: 100%;
+      padding: 11px 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 16px;
+      transition: border-color .15s;
+      -webkit-appearance: none;
+    }
+    .field input:focus {
+      outline: none;
+      border-color: #005baa;
+      box-shadow: 0 0 0 3px #005baa22;
+    }
+    .field input.invalid {
+      border-color: #ef4444;
+      box-shadow: 0 0 0 3px #ef444422;
+    }
+    .field .hint { font-size: 12px; color: #94a3b8; margin-top: 4px; }
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .error-box {
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      color: #b91c1c;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      margin-bottom: 14px;
+    }
+    .btn-continue {
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #005baa, #003d73);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 4px;
+    }
+    .btn-continue:hover { filter: brightness(1.05); }
+    .btn-cancel {
+      display: block;
+      text-align: center;
+      margin-top: 14px;
+      color: #64748b;
+      font-size: 14px;
+      text-decoration: none;
+    }
+    .btn-cancel:hover { color: #c62828; }
+    .footer-note {
+      text-align: center;
+      font-size: 12px;
+      color: #94a3b8;
+      margin-top: 20px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <header class="vnp-header">
+    <div class="vnp-logo">VN<span>Pay</span></div>
+    <span class="vnp-badge">Sandbox — môi trường test</span>
+  </header>
+
+  <div class="wrap">
+    <div class="order-box">
+      <h2>Thông tin đơn hàng</h2>
+      <div class="row">
+        <span class="label">Mã đơn</span>
+        <span class="value">{{ txn_ref }}</span>
+      </div>
+      <div class="row">
+        <span class="label">Nội dung</span>
+        <span class="value">{{ order_info }}</span>
+      </div>
+      <div class="row">
+        <span class="label">Số tiền</span>
+        <span class="value amount">{{ amount_display }} VND</span>
+      </div>
+    </div>
+
+    <div class="bank-card">
+      <div class="bank-head">
+        <div class="bank-icon">NCB</div>
+        <div>
+          <strong>Ngân hàng NCB</strong>
+          <small>Thanh toán qua thẻ nội địa / tài khoản</small>
+        </div>
+      </div>
+
+      <form class="form-body" method="post" action="/api/don-hang/vnpay-mock/confirm/" id="pay-form" novalidate>
+        <input type="hidden" name="txn_ref" value="{{ txn_ref }}">
+        <input type="hidden" name="amount" value="{{ amount_cents }}">
+        <input type="hidden" name="order_info" value="{{ order_info }}">
+        <input type="hidden" name="action" value="success">
+
+        {% if error %}
+        <div class="error-box">{{ error }}</div>
+        {% endif %}
+
+        <div class="field">
+          <label for="so_the">Số thẻ / Số tài khoản</label>
+          <input type="tel" id="so_the" name="so_the" autocomplete="off" spellcheck="false"
+                 placeholder="9704198526191432198" maxlength="19"
+                 value="{{ so_the|default:'' }}">
+          <div class="hint">Chỉ nhập số (8–19 chữ số). Test: 9704198526191432198</div>
+        </div>
+
+        <div class="field">
+          <label for="ten_chu_the">Tên chủ thẻ</label>
+          <input type="text" id="ten_chu_the" name="ten_chu_the" autocomplete="off" spellcheck="false"
+                 placeholder="NGUYEN VAN A" value="{{ ten_chu_the|default:'' }}">
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="ngay_het_han">Ngày hết hạn</label>
+            <input type="text" id="ngay_het_han" name="ngay_het_han" placeholder="07/15"
+                   maxlength="5" inputmode="numeric" value="{{ ngay_het_han|default:'' }}">
+          </div>
+          <div class="field">
+            <label for="otp">Mã OTP</label>
+            <input type="tel" id="otp" name="otp" autocomplete="one-time-code" placeholder="123456"
+                   maxlength="6" value="{{ otp|default:'' }}">
+            <div class="hint">Tùy chọn — test: 123456</div>
+          </div>
+        </div>
+
+        <button type="submit" class="btn-continue">Tiếp tục</button>
+      </form>
+    </div>
+
+    <a class="btn-cancel" href="{{ cancel_url }}">Hủy giao dịch</a>
+
+    <p class="footer-note">
+      Trang test nội bộ (VNPAY_TEST_MODE). Nhập thông tin thẻ rồi bấm <strong>Tiếp tục</strong>.
+    </p>
+  </div>
+
+  <script>
+    (function () {
+      var form = document.getElementById('pay-form');
+      var card = document.getElementById('so_the');
+      var name = document.getElementById('ten_chu_the');
+      var exp = document.getElementById('ngay_het_han');
+      var otp = document.getElementById('otp');
+
+      function digitsOnly(el, max) {
+        if (!el) return;
+        el.addEventListener('input', function () {
+          var pos = el.selectionStart;
+          var before = el.value.length;
+          el.value = el.value.replace(/\D/g, '').slice(0, max);
+          var diff = before - el.value.length;
+          el.setSelectionRange(Math.max(0, pos - diff), Math.max(0, pos - diff));
+          el.classList.remove('invalid');
+        });
+      }
+
+      digitsOnly(card, 19);
+      digitsOnly(otp, 6);
+
+      if (exp) {
+        exp.addEventListener('input', function () {
+          var d = exp.value.replace(/\D/g, '').slice(0, 4);
+          exp.value = d.length > 2 ? d.slice(0, 2) + '/' + d.slice(2) : d;
+        });
+      }
+
+      if (name) {
+        name.addEventListener('input', function () {
+          name.classList.remove('invalid');
+        });
+      }
+
+      if (form) {
+        form.addEventListener('submit', function (e) {
+          var cardDigits = (card && card.value.replace(/\D/g, '')) || '';
+          var nameVal = (name && name.value.trim()) || '';
+          var ok = true;
+
+          if (cardDigits.length < 8) {
+            if (card) card.classList.add('invalid');
+            ok = false;
+          }
+          if (nameVal.length < 2) {
+            if (name) name.classList.add('invalid');
+            ok = false;
+          }
+          if (!ok) {
+            e.preventDefault();
+            var box = form.querySelector('.error-box');
+            if (!box) {
+              box = document.createElement('div');
+              box.className = 'error-box';
+              form.insertBefore(box, form.firstChild);
+            }
+            box.textContent = 'Vui lòng nhập đủ số thẻ (ít nhất 8 số) và tên chủ thẻ.';
+          }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>
