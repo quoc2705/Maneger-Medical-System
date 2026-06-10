@@ -23,18 +23,6 @@ def la_nhan_vien_quay_ban_thuoc(user) -> bool:
     return nv is not None and getattr(nv, 'chuc_vu', None) == 'BAN_THUOC'
 
 
-def la_quan_ly_kho(user) -> bool:
-    """Nhân viên quản lý kho: vai_tro NHAN_VIEN và NhanVien.chuc_vu == KHO."""
-    if not user or not getattr(user, 'is_authenticated', False):
-        return False
-    if getattr(user, 'is_superuser', False) or getattr(user, 'vai_tro', None) == 'ADMIN':
-        return True
-    if getattr(user, 'vai_tro', None) != 'NHAN_VIEN':
-        return False
-    nv = getattr(user, 'nhan_vien', None)
-    return nv is not None and getattr(nv, 'chuc_vu', None) == 'KHO'
-
-
 def la_ke_toan(user) -> bool:
     """Nhân viên kế toán: vai_tro NHAN_VIEN và NhanVien.chuc_vu == KE_TOAN."""
     if not user or not getattr(user, 'is_authenticated', False):
@@ -48,8 +36,8 @@ def la_ke_toan(user) -> bool:
 
 
 def la_duoc_thao_tac_kho(user) -> bool:
-    """Kế toán, quản lý kho hoặc admin — nhập / xuất / sửa lô tồn."""
-    return la_quan_ly_kho(user) or la_ke_toan(user)
+    """Kế toán hoặc admin — nhập / xuất / sửa lô tồn."""
+    return la_ke_toan(user)
 
 
 def la_admin_he_thong(user) -> bool:

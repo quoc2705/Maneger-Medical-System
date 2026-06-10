@@ -15,7 +15,6 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django_filters.rest_framework import DjangoFilterBackend
 from nguoidung.roles import (
-    la_quan_ly_kho,
     la_ke_toan,
     la_duoc_thao_tac_kho,
     la_admin_he_thong,
@@ -322,17 +321,17 @@ class KhoThuocViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         if not la_duoc_thao_tac_kho(self.request.user):
-            raise PermissionDenied('Chỉ kế toán, quản lý kho hoặc quản trị viên được nhập kho.')
+            raise PermissionDenied('Chỉ kế toán hoặc quản trị viên được nhập kho.')
         serializer.save()
 
     def perform_update(self, serializer):
         if not la_duoc_thao_tac_kho(self.request.user):
-            raise PermissionDenied('Chỉ kế toán, quản lý kho hoặc quản trị viên được sửa lô kho.')
+            raise PermissionDenied('Chỉ kế toán hoặc quản trị viên được sửa lô kho.')
         serializer.save()
 
     def perform_destroy(self, instance):
         if not la_duoc_thao_tac_kho(self.request.user):
-            raise PermissionDenied('Chỉ kế toán, quản lý kho hoặc quản trị viên được xóa lô kho.')
+            raise PermissionDenied('Chỉ kế toán hoặc quản trị viên được xóa lô kho.')
         instance.delete()
 
     def get_queryset(self):
@@ -356,7 +355,7 @@ class KhoThuocViewSet(viewsets.ModelViewSet):
     def xuat_sl(self, request, pk=None):
         """Xuất kho theo lô (giảm số lượng)."""
         if not la_duoc_thao_tac_kho(request.user):
-            raise PermissionDenied('Chỉ kế toán, quản lý kho hoặc quản trị viên được xuất kho.')
+            raise PermissionDenied('Chỉ kế toán hoặc quản trị viên được xuất kho.')
         kho = self.get_object()
         try:
             sl = int(request.data.get('so_luong', 0) or 0)
@@ -556,17 +555,17 @@ class KhoVaccineViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         if not la_duoc_thao_tac_kho(self.request.user):
-            raise PermissionDenied('Chỉ kế toán, quản lý kho hoặc quản trị viên được nhập kho.')
+            raise PermissionDenied('Chỉ kế toán hoặc quản trị viên được nhập kho.')
         serializer.save()
 
     def perform_update(self, serializer):
         if not la_duoc_thao_tac_kho(self.request.user):
-            raise PermissionDenied('Chỉ kế toán, quản lý kho hoặc quản trị viên được sửa lô kho.')
+            raise PermissionDenied('Chỉ kế toán hoặc quản trị viên được sửa lô kho.')
         serializer.save()
 
     def perform_destroy(self, instance):
         if not la_duoc_thao_tac_kho(self.request.user):
-            raise PermissionDenied('Chỉ kế toán, quản lý kho hoặc quản trị viên được xóa lô kho.')
+            raise PermissionDenied('Chỉ kế toán hoặc quản trị viên được xóa lô kho.')
         instance.delete()
 
     def get_queryset(self):
@@ -583,7 +582,7 @@ class KhoVaccineViewSet(viewsets.ModelViewSet):
     def xuat_sl(self, request, pk=None):
         """Xuất kho vaccine theo lô."""
         if not la_duoc_thao_tac_kho(request.user):
-            raise PermissionDenied('Chỉ kế toán, quản lý kho hoặc quản trị viên được xuất kho.')
+            raise PermissionDenied('Chỉ kế toán hoặc quản trị viên được xuất kho.')
         kho = self.get_object()
         try:
             sl = int(request.data.get('so_luong', 0) or 0)
@@ -615,7 +614,7 @@ class PhieuNhapKhoViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         """Tạo phiếu nhập (API) — cập nhật tồn kho ngay khi lưu."""
         if not la_duoc_thao_tac_kho(self.request.user):
-            raise PermissionDenied('Chỉ kế toán, quản lý kho hoặc quản trị viên được nhập kho.')
+            raise PermissionDenied('Chỉ kế toán hoặc quản trị viên được nhập kho.')
         serializer.save(nguoi_nhap=self.request.user.get_username())
         phieu = serializer.instance
         if phieu and not phieu.da_cap_nhat_kho:

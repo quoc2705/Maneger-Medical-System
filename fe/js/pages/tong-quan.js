@@ -605,7 +605,6 @@ const PageTongQuan = {
         <div class="card">
           <div class="card-header">
             <div class="card-title"><div class="card-title-icon" style="background:#FEF2F2">⚠️</div>Thuốc sắp hết hàng</div>
-            <button class="btn btn-outline btn-sm" onclick="App.chuyenTrang('kho')">Quản lý kho</button>
           </div>
           <div class="card-body" id="thuoc-sap-het">
             <div class="page-loading"><div class="spinner"></div></div>

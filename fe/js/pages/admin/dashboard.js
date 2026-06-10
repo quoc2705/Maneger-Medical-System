@@ -9,6 +9,7 @@ console.log('dashboard.js loaded');
 const AdminDashboard = {
     currentPage: 'dashboard',
     _initialized: false,
+    _medicineTab: 'thuoc',
 
     /** YYYY-MM-DD theo giờ máy (local). Không dùng toISOString() — bị lệch ngày so với VN (UTC). */
     _fmtLocalYMD(d) {
@@ -225,11 +226,13 @@ const AdminDashboard = {
             }
         });
         
-        // Load page content
-        switch(page) {
-            case 'dashboard':
-                await this.loadDashboard();
-                break;
+        await this.reloadCurrentPage();
+    },
+
+    /** Sau CRUD: tải lại đúng section đang mở (không cần F5). */
+    async reloadCurrentPage() {
+        const page = this.currentPage || 'dashboard';
+        switch (page) {
             case 'doctors':
                 await this.loadDoctors();
                 break;
@@ -250,7 +253,15 @@ const AdminDashboard = {
                 break;
             default:
                 await this.loadDashboard();
+                break;
         }
+    },
+
+    _isCrudOk(result) {
+        if (result == null) return false;
+        if (result.error) return false;
+        if (result.success === false) return false;
+        return true;
     },
     
     // Load user info
@@ -695,7 +706,7 @@ const AdminDashboard = {
                     </tbody>
                 </table>
             </div>
-            <p class="text-muted small mt-2 mb-0">Gồm phiếu nhập cũ và lô <strong>Nhập trực tiếp</strong> (kế toán / quản lý kho). SL lô trực tiếp = số lượng tại thời điểm nhập (có thể giảm sau khi xuất/bán).</p>`;
+            <p class="text-muted small mt-2 mb-0">Gồm phiếu nhập cũ và lô <strong>Nhập trực tiếp</strong> (kế toán). SL lô trực tiếp = số lượng tại thời điểm nhập (có thể giảm sau khi xuất/bán).</p>`;
     },
 
     _tableSearchBarHtml(inputId, placeholder = 'Tìm kiếm...') {
@@ -749,6 +760,29 @@ const AdminDashboard = {
         ].forEach((id) => this._bindTableSearch(id));
     },
 
+    _API_FIELD_LABELS: {
+        ten_dang_nhap: 'Tên đăng nhập',
+        email: 'Email',
+        so_dien_thoai: 'Số điện thoại',
+        password: 'Mật khẩu',
+        password2: 'Nhập lại mật khẩu',
+        ho_ten: 'Họ tên',
+        nguoi_dung: 'Tài khoản',
+        ma_bac_si: 'Mã bác sĩ',
+        ma_nhan_vien: 'Mã nhân viên',
+        chuyen_khoa: 'Chuyên khoa',
+        so_giay_phep: 'Số giấy phép',
+        phong_ban: 'Phòng ban',
+        ngay_sinh: 'Ngày sinh',
+        dia_chi: 'Địa chỉ',
+        gioi_tinh: 'Giới tính',
+        non_field_errors: '',
+    },
+
+    _labelApiField(key) {
+        return this._API_FIELD_LABELS[key] || key.replace(/_/g, ' ');
+    },
+
     _collectApiErrors(payload, prefix = '') {
         if (payload == null) return [];
         if (typeof payload === 'string') return [prefix ? `${prefix}: ${payload}` : payload];
@@ -757,11 +791,55 @@ const AdminDashboard = {
         }
         if (typeof payload === 'object') {
             return Object.entries(payload).flatMap(([key, value]) => {
-                const nextPrefix = prefix ? `${prefix}.${key}` : key;
+                const label = this._labelApiField(key);
+                const nextPrefix = prefix ? `${prefix} → ${label}` : label;
                 return this._collectApiErrors(value, nextPrefix);
             });
         }
         return [prefix ? `${prefix}: ${String(payload)}` : String(payload)];
+    },
+
+    _formatApiError(result, fallback = 'Thao tác thất bại') {
+        if (!result) return fallback;
+        if (typeof result === 'string') return result;
+        if (result.error && result.details) {
+            const details = this._collectApiErrors(result.details).join('; ');
+            return details ? `${result.error}: ${details}` : result.error;
+        }
+        if (result.error) return result.error;
+        if (result.detail) {
+            return typeof result.detail === 'string'
+                ? result.detail
+                : this._collectApiErrors(result.detail).join('; ');
+        }
+        const collected = this._collectApiErrors(result);
+        if (collected.length) return collected.join('; ');
+        if (result.message) return result.message;
+        return fallback;
+    },
+
+    _setModalError(message) {
+        const box = document.getElementById('modal-crud-alert');
+        if (!box) return false;
+        box.textContent = message;
+        box.classList.remove('d-none');
+        box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        return true;
+    },
+
+    _clearModalError() {
+        const box = document.getElementById('modal-crud-alert');
+        if (box) {
+            box.textContent = '';
+            box.classList.add('d-none');
+        }
+    },
+
+    _reportCrudError(result, fallback = 'Thao tác thất bại') {
+        const msg = this._formatApiError(result, fallback);
+        this._setModalError(msg);
+        Toast.error(msg);
+        return msg;
     },
 
     _nextPatientCodeFromList(list = []) {
@@ -1044,18 +1122,15 @@ const AdminDashboard = {
             const address = document.getElementById('patient-address').value.trim();
             
             if (!name || !username || !email || !phone || !password || !birthday || !address) {
-                Toast.error('Vui lòng nhập đầy đủ thông tin bắt buộc');
-                return;
+                return this._reportCrudError({ error: 'Vui lòng nhập đầy đủ thông tin bắt buộc' });
             }
             
             // Validate password strength
             if (password.length < 8) {
-                Toast.error('Mật khẩu phải có ít nhất 8 ký tự');
-                return;
+                return this._reportCrudError({ error: 'Mật khẩu phải có ít nhất 8 ký tự' });
             }
             if (!/[A-Z]/.test(password) || !/\d/.test(password) || !/[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/.test(password)) {
-                Toast.error('Mật khẩu cần có ít nhất 1 chữ hoa, 1 số và 1 ký tự đặc biệt');
-                return;
+                return this._reportCrudError({ error: 'Mật khẩu cần có ít nhất 1 chữ hoa, 1 số và 1 ký tự đặc biệt' });
             }
             
             const data = {
@@ -1077,15 +1152,14 @@ const AdminDashboard = {
                 sdt_nguoi_than: document.getElementById('patient-emergency-phone').value.trim()
             };
             
-            const result = await this.apiPost('/admin/benh-nhan/', data);
-            if (result && !result.error) {
+            const result = await this.apiPost('/admin/benh-nhan/', data, { silent: true });
+            if (this._isCrudOk(result)) {
                 this.closeModal();
                 Toast.success('Thêm bệnh nhân thành công!');
                 // Real-time update table
                 await this.refreshPatientsTable();
             } else {
-                const err = this._collectApiErrors(result).join('; ');
-                Toast.error(err || result?.error || result?.detail || 'Thêm thất bại');
+                this._reportCrudError(result, 'Thêm bệnh nhân thất bại');
             }
         });
     },
@@ -1185,25 +1259,22 @@ const AdminDashboard = {
             if (userPhone) updateData.so_dien_thoai = userPhone;
             if (newPassword && newPassword.length >= 8) {
                 if (!/[A-Z]/.test(newPassword) || !/\d/.test(newPassword) || !/[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/.test(newPassword)) {
-                    Toast.error('Mật khẩu mới cần có ít nhất 1 chữ hoa, 1 số và 1 ký tự đặc biệt');
-                    return;
+                    return this._reportCrudError({ error: 'Mật khẩu mới cần có ít nhất 1 chữ hoa, 1 số và 1 ký tự đặc biệt' });
                 }
                 updateData.password = newPassword;
                 updateData.password2 = newPassword;
             } else if (newPassword && newPassword.length < 8) {
-                Toast.error('Mật khẩu mới phải có ít nhất 8 ký tự');
-                return;
+                return this._reportCrudError({ error: 'Mật khẩu mới phải có ít nhất 8 ký tự' });
             }
             
-            const result = await this.apiPut(`/admin/benh-nhan/${id}/`, updateData);
-            if (result && !result.error) {
+            const result = await this.apiPut(`/admin/benh-nhan/${id}/`, updateData, { silent: true });
+            if (this._isCrudOk(result)) {
                 this.closeModal();
                 Toast.success('Cập nhật bệnh nhân thành công!');
                 // Real-time update table
                 await this.refreshPatientsTable();
             } else {
-                const err = this._collectApiErrors(result).join('; ');
-                Toast.error(err || result?.error || result?.detail || 'Cập nhật thất bại');
+                this._reportCrudError(result, 'Cập nhật bệnh nhân thất bại');
             }
         });
     },
@@ -1220,8 +1291,6 @@ const AdminDashboard = {
                 Toast.success('Đã vô hiệu hóa tài khoản bệnh nhân!');
                 // Real-time update table - xóa dòng hoặc reload
                 await this.refreshPatientsTable();
-            } else {
-                Toast.error('Xóa thất bại');
             }
         }
     },
@@ -1233,10 +1302,14 @@ const AdminDashboard = {
             const patients = this._extractList(patientRes);
             this._currentData.patients = patients;
             const tbody = document.getElementById('patients-table-body');
-            if (tbody) {
-                tbody.innerHTML = patients.map(p => this.renderPatientRow(p)).join('');
-            } else {
+            if (!tbody) {
                 await this.loadPatients();
+                return;
+            }
+            tbody.innerHTML = patients.map(p => this.renderPatientRow(p)).join('');
+            const title = document.querySelector('#admin-content .card-title');
+            if (title && String(title.textContent || '').includes('Danh sách bệnh nhân')) {
+                title.textContent = `Danh sách bệnh nhân (${patients.length})`;
             }
         } catch (error) {
             console.error('Error refreshing patients:', error);
@@ -1244,25 +1317,79 @@ const AdminDashboard = {
     },
     
     // Load staff list
+    renderStaffRow(s) {
+        const pk = this._pkNhanVien(s);
+        const ten = String(s.ho_ten || '').replace(/'/g, "\\'");
+        return `
+        <tr>
+            <td>${this.escapeHtml(s.ma_nhan_vien || '')}</td>
+            <td>${this.escapeHtml(s.ho_ten || '')}</td>
+            <td>${this.escapeHtml(s.phong_ban || '')}</td>
+            <td>${this.escapeHtml(s.chuc_vu_display || s.chuc_vu || '')}</td>
+            <td>
+                <span class="badge ${s.is_working ? 'badge-success' : 'badge-danger'}">
+                    ${s.is_working ? 'Đang làm việc' : 'Đã nghỉ'}
+                </span>
+            </td>
+            <td>
+                <button class="btn btn-outline btn-sm" ${!pk ? 'disabled' : ''} onclick="AdminDashboard.editStaff('${pk}')">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button class="btn btn-danger btn-sm" ${!pk ? 'disabled' : ''} onclick="AdminDashboard.deleteStaff('${pk}', '${ten}')">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </td>
+        </tr>`;
+    },
+
+    async refreshStaffTable() {
+        try {
+            this.currentPage = 'staff';
+            const staffRes = await this.apiGet('/admin/nhan-vien/');
+            const staff = this._extractList(staffRes);
+            this._currentData.staff = staff;
+            const tbody = document.getElementById('staff-table-body');
+            if (!tbody) {
+                await this.loadStaff();
+                return;
+            }
+            tbody.innerHTML = staff.map((s) => this.renderStaffRow(s)).join('');
+            const title = document.querySelector('#admin-content .card-title');
+            if (title && String(title.textContent || '').includes('Danh sách nhân viên')) {
+                title.textContent = `Danh sách nhân viên (${staff.length})`;
+            }
+        } catch (error) {
+            console.error('Error refreshing staff:', error);
+            await this.loadStaff();
+        }
+    },
+
     async loadStaff() {
         const content = document.getElementById('admin-content');
+        if (!content) return;
+        this.currentPage = 'staff';
         content.innerHTML = '<div class="loading-container"><div class="spinner"></div><p>Đang tải danh sách nhân viên...</p></div>';
         
         try {
             const staffRes = await this.apiGet('/admin/nhan-vien/');
             const staff = this._extractList(staffRes);
             this._currentData.staff = staff;
-            if (!staff) return;
             
             content.innerHTML = `
                 <div class="card">
                     <div class="card-header">
-                        <div class="card-title">Danh sách nhân viên</div>
+                        <div class="card-title">Danh sách nhân viên (${staff.length})</div>
                         <button class="btn btn-primary btn-sm" onclick="AdminDashboard.showAddStaffModal()">
                             <i class="fas fa-plus"></i> Thêm nhân viên
                         </button>
                     </div>
                     <div class="card-body">
+                        ${staff.length === 0 ? `
+                            <div class="text-center" style="padding: 40px;">
+                                <p class="text-muted">Chưa có nhân viên nào</p>
+                                <button class="btn btn-primary btn-sm mt-2" onclick="AdminDashboard.showAddStaffModal()">Thêm nhân viên đầu tiên</button>
+                            </div>
+                        ` : `
                         <div class="table-wrapper">
                             <table class="data-table">
                                 <thead>
@@ -1275,34 +1402,12 @@ const AdminDashboard = {
                                         <th>Thao tác</th>
                                     </tr>
                                 </thead>
-                                <tbody>
-                                    ${staff.map(s => {
-                                        const pk = AdminDashboard._pkNhanVien(s);
-                                        const ten = String(s.ho_ten || '').replace(/'/g, "\\'");
-                                        return `
-                                        <tr>
-                                            <td>${s.ma_nhan_vien}</td>
-                                            <td>${s.ho_ten || ''}</td>
-                                            <td>${s.phong_ban}</td>
-                                            <td>${s.chuc_vu_display || s.chuc_vu}</td>
-                                            <td>
-                                                <span class="badge ${s.is_working ? 'badge-success' : 'badge-danger'}">
-                                                    ${s.is_working ? 'Đang làm việc' : 'Đã nghỉ'}
-                                                </span>
-                                            </td>
-                                            <td>
-                                                <button class="btn btn-outline btn-sm" ${!pk ? 'disabled' : ''} onclick="AdminDashboard.editStaff('${pk}')">
-                                                    <i class="fas fa-edit"></i>
-                                                </button>
-                                                <button class="btn btn-danger btn-sm" ${!pk ? 'disabled' : ''} onclick="AdminDashboard.deleteStaff('${pk}', '${ten}')">
-                                                    <i class="fas fa-trash"></i>
-                                                </button>
-                                            </td>
-                                        </tr>`;
-                                    }).join('')}
+                                <tbody id="staff-table-body">
+                                    ${staff.map((s) => this.renderStaffRow(s)).join('')}
                                 </tbody>
                             </table>
                         </div>
+                        `}
                     </div>
                 </div>
             `;
@@ -1697,6 +1802,7 @@ const AdminDashboard = {
                 </div>
             `;
             this._initMedicinePageSearches();
+            this.switchMedicineTab(this._medicineTab || 'thuoc');
         } catch (error) {
             console.error('Error loading medicines:', error);
             content.innerHTML = '<div class="card"><div class="card-body"><p class="text-muted">Lỗi tải dữ liệu</p></div></div>';
@@ -1704,6 +1810,7 @@ const AdminDashboard = {
     },
 
     switchMedicineTab(tab) {
+        this._medicineTab = tab || 'thuoc';
         const pt = document.getElementById('med-panel-thuoc');
         const pv = document.getElementById('med-panel-vaccine');
         const bt = document.getElementById('tab-btn-thuoc');
@@ -1739,10 +1846,10 @@ const AdminDashboard = {
             };
             if (!payload.ten_loai) return Toast.error('Tên loại là bắt buộc');
             const result = await this.apiPost('/thuoc/loai-vaccine/', payload);
-            if (result && !result.error) {
+            if (this._isCrudOk(result)) {
                 this.closeModal();
                 Toast.success('Thêm loại vaccine thành công!');
-                await this.loadMedicines();
+                await this.reloadCurrentPage();
             } else {
                 Toast.error(result?.detail || result?.error || 'Thêm thất bại');
             }
@@ -1768,10 +1875,10 @@ const AdminDashboard = {
             };
             if (!payload.ten_loai) return Toast.error('Tên loại là bắt buộc');
             const result = await this.apiPut(`/thuoc/loai-vaccine/${id}/`, payload);
-            if (result && !result.error) {
+            if (this._isCrudOk(result)) {
                 this.closeModal();
                 Toast.success('Cập nhật thành công!');
-                await this.loadMedicines();
+                await this.reloadCurrentPage();
             } else {
                 Toast.error(result?.detail || result?.error || 'Cập nhật thất bại');
             }
@@ -1783,7 +1890,7 @@ const AdminDashboard = {
         const success = await this.apiDelete(`/thuoc/loai-vaccine/${id}/`);
         if (success) {
             Toast.success('Đã xóa');
-            await this.loadMedicines();
+            await this.reloadCurrentPage();
         } else Toast.error('Xóa thất bại');
     },
 
@@ -1887,10 +1994,10 @@ const AdminDashboard = {
             } else {
                 result = await this.apiPost('/thuoc/vaccine/', data);
             }
-            if (result && !result.error) {
+            if (this._isCrudOk(result)) {
                 this.closeModal();
                 Toast.success('Thêm vaccine thành công!');
-                await this.loadMedicines();
+                await this.reloadCurrentPage();
             } else {
                 Toast.error(result?.detail || result?.error || 'Thêm thất bại');
             }
@@ -1958,7 +2065,7 @@ const AdminDashboard = {
             let result;
             if (file) {
                 result = await this.apiPatch(`/thuoc/vaccine/${id}/`, payload);
-                if (result && !result.error) {
+                if (this._isCrudOk(result)) {
                     const fd = new FormData();
                     fd.append('hinh_anh', file);
                     result = await this.apiPatchFormData(`/thuoc/vaccine/${id}/`, fd);
@@ -1966,10 +2073,10 @@ const AdminDashboard = {
             } else {
                 result = await this.apiPatch(`/thuoc/vaccine/${id}/`, payload);
             }
-            if (result && !result.error) {
+            if (this._isCrudOk(result)) {
                 this.closeModal();
                 Toast.success('Cập nhật vaccine thành công!');
-                await this.loadMedicines();
+                await this.reloadCurrentPage();
             } else {
                 Toast.error(result?.detail || result?.error || 'Cập nhật thất bại');
             }
@@ -1981,7 +2088,7 @@ const AdminDashboard = {
         const success = await this.apiDelete(`/thuoc/vaccine/${id}/`);
         if (success) {
             Toast.success('Đã xóa vaccine');
-            await this.loadMedicines();
+            await this.reloadCurrentPage();
         } else Toast.error('Xóa thất bại');
     },
 
@@ -2043,10 +2150,10 @@ const AdminDashboard = {
                 return Toast.error('Hạn SD phải sau ngày nhập');
             }
             const result = await this.apiPost('/thuoc/kho-vaccine/', payload);
-            if (result && !result.error) {
+            if (this._isCrudOk(result)) {
                 this.closeModal();
                 Toast.success('Nhập kho vaccine thành công!');
-                await this.loadMedicines();
+                await this.reloadCurrentPage();
             } else {
                 Toast.error(result?.detail || result?.error || 'Nhập kho thất bại');
             }
@@ -2413,7 +2520,7 @@ const AdminDashboard = {
         if (!ok) return;
 
         const result = await this.apiPost('/thong-bao/phat-hanh/', body);
-        if (result && !result.error) {
+        if (this._isCrudOk(result)) {
             const so = result.so_nguoi_nhan ?? result.so_nguoi_nhan_thuc_te ?? 0;
             if (result.id || result.tieu_de || so > 0) {
                 this.closeModal();
@@ -2705,11 +2812,13 @@ const AdminDashboard = {
     async apiGet(url) {
         const token = localStorage.getItem('access_token');
         const apiUrl = this._buildApiUrl(url);
+        const bustUrl = apiUrl + (apiUrl.includes('?') ? '&' : '?') + '_=' + Date.now();
         
-        console.log('[apiGet] Calling:', apiUrl);
+        console.log('[apiGet] Calling:', bustUrl);
         
         try {
-            const response = await fetch(apiUrl, {
+            const response = await fetch(bustUrl, {
+                cache: 'no-store',
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
@@ -2802,7 +2911,8 @@ const AdminDashboard = {
         window.location.href = '/login/';
     },
     
-    async apiPost(url, data) {
+    async apiPost(url, data, options = {}) {
+        const silent = options.silent === true;
         const token = localStorage.getItem('access_token');
         const apiUrl = this._buildApiUrl(url);
         
@@ -2829,7 +2939,7 @@ const AdminDashboard = {
             if (response.status === 401) {
                 const refreshed = await this.refreshToken();
                 if (refreshed) {
-                    return this.apiPost(url, data);
+                    return this.apiPost(url, data, options);
                 } else {
                     this.logout();
                     return null;
@@ -2845,7 +2955,10 @@ const AdminDashboard = {
                     throw new Error(result.error);
                 }
                 if (result.detail) {
-                    throw new Error(result.detail);
+                    const detailText = typeof result.detail === 'string'
+                        ? result.detail
+                        : this._collectApiErrors(result.detail).join('; ');
+                    throw new Error(detailText || String(result.detail));
                 }
                 const errorMessages = this._collectApiErrors(result);
                 if (errorMessages.length) {
@@ -2857,7 +2970,7 @@ const AdminDashboard = {
             return result;
         } catch (error) {
             console.error('API POST error:', error);
-            Toast.error(error.message || 'Lỗi kết nối');
+            if (!silent) Toast.error(error.message || 'Lỗi kết nối');
             return { error: error.message };
         }
     },
@@ -2930,7 +3043,8 @@ const AdminDashboard = {
     },
 
     // SỬA HÀM apiPut
-    async apiPut(url, data) {
+    async apiPut(url, data, options = {}) {
+        const silent = options.silent === true;
         const token = localStorage.getItem('access_token');
         const apiUrl = this._buildApiUrl(url);
         
@@ -2955,7 +3069,7 @@ const AdminDashboard = {
             if (response.status === 401) {
                 const refreshed = await this.refreshToken();
                 if (refreshed) {
-                    return this.apiPut(url, data);
+                    return this.apiPut(url, data, options);
                 } else {
                     this.logout();
             return null;
@@ -2968,15 +3082,21 @@ const AdminDashboard = {
                     throw new Error(`${result.error}: ${detailMsgs.join('; ')}`);
                 }
                 if (result.error) throw new Error(result.error);
-                if (result.detail) throw new Error(result.detail);
-                if (detailMsgs.length) throw new Error(detailMsgs.join('; '));
+                if (result.detail) {
+                    const detailText = typeof result.detail === 'string'
+                        ? result.detail
+                        : this._collectApiErrors(result.detail).join('; ');
+                    throw new Error(detailText || String(result.detail));
+                }
+                const errorMessages = this._collectApiErrors(result);
+                if (errorMessages.length) throw new Error(errorMessages.join('; '));
                 throw new Error(`Lỗi ${response.status}`);
             }
             
             return result;
         } catch (error) {
             console.error('API PUT error:', error);
-            Toast.error(error.message || 'Cập nhật thất bại');
+            if (!silent) Toast.error(error.message || 'Cập nhật thất bại');
             return { error: error.message };
         }
     },
@@ -3028,7 +3148,8 @@ const AdminDashboard = {
     },
 
     // SỬA HÀM apiDelete
-    async apiDelete(url) {
+    async apiDelete(url, options = {}) {
+        const silent = options.silent === true;
         const token = localStorage.getItem('access_token');
         const apiUrl = this._buildApiUrl(url);
         
@@ -3044,17 +3165,28 @@ const AdminDashboard = {
             if (response.status === 401) {
                 const refreshed = await this.refreshToken();
                 if (refreshed) {
-                    return this.apiDelete(url);
+                    return this.apiDelete(url, options);
                 } else {
                     this.logout();
                     return false;
                 }
             }
+
+            if (!response.ok) {
+                const text = await response.text();
+                let result = {};
+                if (text) {
+                    try { result = JSON.parse(text); } catch (e) {}
+                }
+                const msg = this._formatApiError(result, 'Xóa thất bại');
+                if (!silent) Toast.error(msg);
+                return false;
+            }
             
-            return response.ok;
+            return true;
         } catch (error) {
             console.error('API DELETE error:', error);
-            Toast.error('Xóa thất bại');
+            if (!silent) Toast.error(error.message || 'Xóa thất bại');
             return false;
         }
     },
@@ -3148,30 +3280,48 @@ const AdminDashboard = {
                 </div>
             </div>
         `, async () => {
+            const name = document.getElementById('doctor-name').value.trim();
+            const username = document.getElementById('doctor-username').value.trim();
+            const email = document.getElementById('doctor-email').value.trim();
+            const phone = document.getElementById('doctor-phone').value.trim();
+            const password = document.getElementById('doctor-password').value;
+            const specialty = document.getElementById('doctor-specialty').value.trim();
+            const license = document.getElementById('doctor-license').value.trim();
+
+            if (!name || !username || !email || !phone || !password || !specialty || !license) {
+                return this._reportCrudError({ error: 'Vui lòng nhập đầy đủ thông tin bắt buộc' });
+            }
+            if (password.length < 8) {
+                return this._reportCrudError({ error: 'Mật khẩu phải có ít nhất 8 ký tự' });
+            }
+            if (!/[A-Z]/.test(password) || !/\d/.test(password) || !/[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/.test(password)) {
+                return this._reportCrudError({ error: 'Mật khẩu cần có ít nhất 1 chữ hoa, 1 số và 1 ký tự đặc biệt' });
+            }
+
             const data = {
                 nguoi_dung: {
-                    ho_ten: document.getElementById('doctor-name').value,
-                    ten_dang_nhap: document.getElementById('doctor-username').value,
-                    email: document.getElementById('doctor-email').value,
-                    so_dien_thoai: document.getElementById('doctor-phone').value,
-                    password: document.getElementById('doctor-password').value,
-                    password2: document.getElementById('doctor-password').value,
+                    ho_ten: name,
+                    ten_dang_nhap: username,
+                    email: email,
+                    so_dien_thoai: phone,
+                    password: password,
+                    password2: password,
                     vai_tro: 'BAC_SI'
                 },
                 ma_bac_si: document.getElementById('doctor-code').value.trim(),
-                chuyen_khoa: document.getElementById('doctor-specialty').value,
-                so_giay_phep: document.getElementById('doctor-license').value,
+                chuyen_khoa: specialty,
+                so_giay_phep: license,
                 trinh_do: document.getElementById('doctor-degree').value,
                 chuc_vu: document.getElementById('doctor-position').value
             };
             
-            const result = await this.apiPost('/admin/bac-si/', data);
-            if (result && !result.error) {
+            const result = await this.apiPost('/admin/bac-si/', data, { silent: true });
+            if (this._isCrudOk(result)) {
                 this.closeModal();
                 Toast.success('Thêm bác sĩ thành công!');
-                await this.loadDoctors();
+                await this.reloadCurrentPage();
             } else {
-                Toast.error(result?.error || 'Thêm thất bại');
+                this._reportCrudError(result, 'Thêm bác sĩ thất bại');
             }
         });
     },
@@ -3237,8 +3387,6 @@ const AdminDashboard = {
                 <select id="staff-role" class="form-control">
                     <option value="LE_TAN">Lễ tân</option>
                     <option value="BAN_THUOC">Bán thuốc (quầy)</option>
-                    <option value="DIEU_DUONG">Điều dưỡng</option>
-                    <option value="KHO">Quản lý kho</option>
                     <option value="KE_TOAN">Kế toán</option>
                 </select>
             </div>
@@ -3279,21 +3427,26 @@ const AdminDashboard = {
             if (!data.nguoi_dung.ho_ten || !data.nguoi_dung.ten_dang_nhap || !data.nguoi_dung.email ||
                 !data.nguoi_dung.so_dien_thoai || !data.nguoi_dung.password || !data.nguoi_dung.password2 ||
                 !data.ma_nhan_vien || !data.phong_ban) {
-                return Toast.error('Vui lòng nhập đầy đủ thông tin bắt buộc');
+                return this._reportCrudError({ error: 'Vui lòng nhập đầy đủ thông tin bắt buộc' });
             }
             if (data.nguoi_dung.password !== data.nguoi_dung.password2) {
-                return Toast.error('Mật khẩu nhập lại không khớp');
+                return this._reportCrudError({ error: 'Mật khẩu nhập lại không khớp' });
+            }
+            if (data.nguoi_dung.password.length < 8) {
+                return this._reportCrudError({ error: 'Mật khẩu phải có ít nhất 8 ký tự' });
+            }
+            if (!/[A-Z]/.test(data.nguoi_dung.password) || !/\d/.test(data.nguoi_dung.password) ||
+                !/[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/.test(data.nguoi_dung.password)) {
+                return this._reportCrudError({ error: 'Mật khẩu cần có ít nhất 1 chữ hoa, 1 số và 1 ký tự đặc biệt' });
             }
             
-            const result = await this.apiPost('/admin/nhan-vien/', data);
-            if (result && !result.error) {
+            const result = await this.apiPost('/admin/nhan-vien/', data, { silent: true });
+            if (this._isCrudOk(result)) {
                 this.closeModal();
                 Toast.success('Thêm nhân viên thành công!');
-                await this.loadStaff();
-                await this.loadDashboard();
+                await this.refreshStaffTable();
             } else {
-                const err = this._collectApiErrors(result || {}).join('; ');
-                Toast.error(err || result?.error || 'Thêm thất bại');
+                this._reportCrudError(result, 'Thêm nhân viên thất bại');
             }
         });
     },
@@ -3460,7 +3613,7 @@ const AdminDashboard = {
                 } else {
                     result = await this.apiPost('/thuoc/thuoc/', data);
                 }
-                if (result && !result.error) {
+                if (this._isCrudOk(result)) {
                     const newId = result.id;
                     if (ksl > 0 && newId) {
                         const khoPayload = {
@@ -3474,16 +3627,16 @@ const AdminDashboard = {
                         if (khoResult && !khoResult.error) {
                             this.closeModal();
                             Toast.success('Đã thêm thuốc và tạo lô tồn đầu.');
-                            await this.loadMedicines();
+                            await this.reloadCurrentPage();
                         } else {
                             this.closeModal();
                             Toast.hien('Thông báo', 'Đã lưu thuốc nhưng không tạo được lô kho — vui lòng nhập kho sau.', 'warning');
-                            await this.loadMedicines();
+                            await this.reloadCurrentPage();
                         }
                     } else {
                         this.closeModal();
                         Toast.success('Thêm thuốc thành công!');
-                        await this.loadMedicines();
+                        await this.reloadCurrentPage();
                     }
                 } else {
                     Toast.error(result?.detail || result?.error || 'Thêm thuốc thất bại');
@@ -3511,10 +3664,10 @@ const AdminDashboard = {
             };
             if (!payload.ten_loai) return Toast.error('Tên loại thuốc là bắt buộc');
             const result = await this.apiPost('/thuoc/loai-thuoc/', payload);
-            if (result && !result.error) {
+            if (this._isCrudOk(result)) {
                 this.closeModal();
                 Toast.success('Thêm loại thuốc thành công!');
-                await this.loadMedicines();
+                await this.reloadCurrentPage();
             } else {
                 Toast.error(result?.error || 'Thêm loại thuốc thất bại');
             }
@@ -3540,10 +3693,10 @@ const AdminDashboard = {
             };
             if (!payload.ten_loai) return Toast.error('Tên loại thuốc là bắt buộc');
             const result = await this.apiPut(`/thuoc/loai-thuoc/${id}/`, payload);
-            if (result && !result.error) {
+            if (this._isCrudOk(result)) {
                 this.closeModal();
                 Toast.success('Cập nhật loại thuốc thành công!');
-                await this.loadMedicines();
+                await this.reloadCurrentPage();
             } else {
                 Toast.error(result?.error || 'Cập nhật loại thuốc thất bại');
             }
@@ -3555,7 +3708,7 @@ const AdminDashboard = {
         const success = await this.apiDelete(`/thuoc/loai-thuoc/${id}/`);
         if (success) {
             Toast.success('Đã xóa loại thuốc thành công!');
-            await this.loadMedicines();
+            await this.reloadCurrentPage();
         } else {
             Toast.error('Xóa loại thuốc thất bại');
         }
@@ -3578,10 +3731,10 @@ const AdminDashboard = {
             };
             if (!payload.ten_don_vi) return Toast.error('Tên đơn vị tính là bắt buộc');
             const result = await this.apiPost('/thuoc/don-vi-tinh/', payload);
-            if (result && !result.error) {
+            if (this._isCrudOk(result)) {
                 this.closeModal();
                 Toast.success('Thêm đơn vị tính thành công!');
-                await this.loadMedicines();
+                await this.reloadCurrentPage();
             } else {
                 Toast.error(result?.error || 'Thêm đơn vị tính thất bại');
             }
@@ -3607,10 +3760,10 @@ const AdminDashboard = {
             };
             if (!payload.ten_don_vi) return Toast.error('Tên đơn vị tính là bắt buộc');
             const result = await this.apiPut(`/thuoc/don-vi-tinh/${id}/`, payload);
-            if (result && !result.error) {
+            if (this._isCrudOk(result)) {
                 this.closeModal();
                 Toast.success('Cập nhật đơn vị tính thành công!');
-                await this.loadMedicines();
+                await this.reloadCurrentPage();
             } else {
                 Toast.error(result?.error || 'Cập nhật đơn vị tính thất bại');
             }
@@ -3622,7 +3775,7 @@ const AdminDashboard = {
         const success = await this.apiDelete(`/thuoc/don-vi-tinh/${id}/`);
         if (success) {
             Toast.success('Đã xóa đơn vị tính thành công!');
-            await this.loadMedicines();
+            await this.reloadCurrentPage();
         } else {
             Toast.error('Xóa đơn vị tính thất bại');
         }
@@ -3674,10 +3827,10 @@ const AdminDashboard = {
                 return Toast.error('Điền đủ mã, tên, địa chỉ và số điện thoại');
             }
             const result = await this.apiPost('/thuoc/nha-cung-cap/', payload);
-            if (result && !result.error) {
+            if (this._isCrudOk(result)) {
                 this.closeModal();
                 Toast.success('Thêm nhà cung cấp thành công!');
-                await this.loadMedicines();
+                await this.reloadCurrentPage();
             } else {
                 Toast.error(result?.detail || result?.error || 'Thêm NCC thất bại');
             }
@@ -3735,10 +3888,10 @@ const AdminDashboard = {
                 return Toast.error('Điền đủ các trường bắt buộc');
             }
             const result = await this.apiPut(`/thuoc/nha-cung-cap/${id}/`, payload);
-            if (result && !result.error) {
+            if (this._isCrudOk(result)) {
                 this.closeModal();
                 Toast.success('Cập nhật NCC thành công!');
-                await this.loadMedicines();
+                await this.reloadCurrentPage();
             } else {
                 Toast.error(result?.detail || result?.error || 'Cập nhật thất bại');
             }
@@ -3750,7 +3903,7 @@ const AdminDashboard = {
         const success = await this.apiDelete(`/thuoc/nha-cung-cap/${id}/`);
         if (success) {
             Toast.success('Đã xóa NCC thành công!');
-            await this.loadMedicines();
+            await this.reloadCurrentPage();
         } else {
             Toast.error('Xóa NCC thất bại');
         }
@@ -3796,6 +3949,7 @@ const AdminDashboard = {
                         <button type="button" class="btn btn-ghost" onclick="AdminDashboard.closeModal()">✕</button>
                     </div>
                     <div class="modal-body">
+                        <div id="modal-crud-alert" class="form-alert error d-none" role="alert"></div>
                         ${body}
                     </div>
                     <div class="modal-footer">
@@ -3810,7 +3964,18 @@ const AdminDashboard = {
         setTimeout(() => modal.classList.add('open'), 10);
         
         const confirmBtn = document.getElementById('modal-confirm-btn');
-        confirmBtn.onclick = () => onConfirm();
+        confirmBtn.onclick = async () => {
+            this._clearModalError();
+            confirmBtn.disabled = true;
+            const originalLabel = confirmBtn.textContent;
+            confirmBtn.textContent = 'Đang xử lý...';
+            try {
+                await onConfirm();
+            } finally {
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = originalLabel;
+            }
+        };
     },
     
     closeModal() {
@@ -3861,9 +4026,7 @@ const AdminDashboard = {
             const success = await this.apiDelete(`/admin/bac-si/${ma}/`);
             if (success) {
                 Toast.success('Xóa bác sĩ thành công!');
-                await this.loadDoctors();
-            } else {
-                Toast.error('Xóa thất bại');
+                await this.reloadCurrentPage();
             }
         }
     },
@@ -3877,10 +4040,7 @@ const AdminDashboard = {
             const success = await this.apiDelete(`/admin/nhan-vien/${ma}/`);
             if (success) {
                 Toast.success('Xóa nhân viên thành công!');
-                await this.loadStaff();
-                await this.loadDashboard();
-            } else {
-                Toast.error('Xóa thất bại');
+                await this.refreshStaffTable();
             }
         }
     },
@@ -3987,16 +4147,15 @@ const AdminDashboard = {
                 is_working: document.getElementById('edit-doctor-working').value === 'true'
             };
             if (!payload.nguoi_dung.ho_ten || !payload.nguoi_dung.email || !payload.nguoi_dung.so_dien_thoai || !payload.chuyen_khoa) {
-                return Toast.error('Vui lòng nhập đầy đủ họ tên, email, số điện thoại và chuyên khoa');
+                return this._reportCrudError({ error: 'Vui lòng nhập đầy đủ họ tên, email, số điện thoại và chuyên khoa' });
             }
-            const result = await this.apiPut(`/admin/bac-si/${ma}/`, payload);
-            if (result && !result.error) {
+            const result = await this.apiPut(`/admin/bac-si/${ma}/`, payload, { silent: true });
+            if (this._isCrudOk(result)) {
                 this.closeModal();
                 Toast.success('Cập nhật bác sĩ thành công!');
-                await this.loadDoctors();
+                await this.reloadCurrentPage();
             } else {
-                const err = this._collectApiErrors(result || {}).join('; ');
-                Toast.error(err || result?.error || 'Cập nhật thất bại');
+                this._reportCrudError(result, 'Cập nhật bác sĩ thất bại');
             }
         });
     },
@@ -4054,8 +4213,6 @@ const AdminDashboard = {
                 <select id="edit-staff-role" class="form-control">
                     <option value="LE_TAN" ${(nv.chuc_vu || '') === 'LE_TAN' ? 'selected' : ''}>Lễ tân</option>
                     <option value="BAN_THUOC" ${(nv.chuc_vu || '') === 'BAN_THUOC' ? 'selected' : ''}>Bán thuốc (quầy)</option>
-                    <option value="DIEU_DUONG" ${(nv.chuc_vu || '') === 'DIEU_DUONG' ? 'selected' : ''}>Điều dưỡng</option>
-                    <option value="KHO" ${(nv.chuc_vu || '') === 'KHO' ? 'selected' : ''}>Quản lý kho</option>
                     <option value="KE_TOAN" ${(nv.chuc_vu || '') === 'KE_TOAN' ? 'selected' : ''}>Kế toán</option>
                 </select>
             </div>
@@ -4091,17 +4248,15 @@ const AdminDashboard = {
                 is_working: document.getElementById('edit-staff-working').value === 'true'
             };
             if (!payload.nguoi_dung.ho_ten || !payload.nguoi_dung.email || !payload.nguoi_dung.so_dien_thoai || !payload.phong_ban) {
-                return Toast.error('Vui lòng nhập đầy đủ họ tên, email, số điện thoại và phòng ban');
+                return this._reportCrudError({ error: 'Vui lòng nhập đầy đủ họ tên, email, số điện thoại và phòng ban' });
             }
-            const result = await this.apiPut(`/admin/nhan-vien/${ma}/`, payload);
-            if (result && !result.error) {
+            const result = await this.apiPut(`/admin/nhan-vien/${ma}/`, payload, { silent: true });
+            if (this._isCrudOk(result)) {
                 this.closeModal();
                 Toast.success('Cập nhật nhân viên thành công!');
-                await this.loadStaff();
-                await this.loadDashboard();
+                await this.refreshStaffTable();
             } else {
-                const err = this._collectApiErrors(result || {}).join('; ');
-                Toast.error(err || result?.error || 'Cập nhật thất bại');
+                this._reportCrudError(result, 'Cập nhật nhân viên thất bại');
             }
         });
     },
@@ -4181,7 +4336,7 @@ const AdminDashboard = {
             let result;
             if (file) {
                 result = await this.apiPatch(`/thuoc/thuoc/${id}/`, payload);
-                if (result && !result.error) {
+                if (this._isCrudOk(result)) {
                     const fd = new FormData();
                     fd.append('hinh_anh', file);
                     result = await this.apiPatchFormData(`/thuoc/thuoc/${id}/`, fd);
@@ -4189,10 +4344,10 @@ const AdminDashboard = {
             } else {
                 result = await this.apiPatch(`/thuoc/thuoc/${id}/`, payload);
             }
-            if (result && !result.error) {
+            if (this._isCrudOk(result)) {
                 this.closeModal();
                 Toast.success('Cập nhật thuốc thành công!');
-                await this.loadMedicines();
+                await this.reloadCurrentPage();
             } else {
                 Toast.error(result?.error || 'Cập nhật thất bại');
             }
@@ -4263,10 +4418,10 @@ const AdminDashboard = {
             }
 
             const result = await this.apiPost('/thuoc/kho-thuoc/', payload);
-            if (result && !result.error) {
+            if (this._isCrudOk(result)) {
                 this.closeModal();
                 Toast.success('Nhập kho thành công!');
-                await this.loadMedicines();
+                await this.reloadCurrentPage();
             } else {
                 Toast.error(result?.error || result?.detail || 'Nhập kho thất bại');
             }
@@ -4290,7 +4445,7 @@ const AdminDashboard = {
         const success = await this.apiDelete(`/thuoc/thuoc/${id}/`);
         if (success) {
             Toast.success('Đã xóa thuốc thành công!');
-            await this.loadMedicines();
+            await this.reloadCurrentPage();
         } else {
             Toast.error('Xóa thuốc thất bại');
         }
@@ -4304,7 +4459,17 @@ const AdminDashboard = {
         this.switchPage('notifications');
     },
     
-    markAllNotificationsRead() {
+    async markAllNotificationsRead() {
+        if (window.ThongBaoBell) {
+            await ThongBaoBell.danhDauTatCa();
+        } else {
+            const res = await Http.tao('/thong-bao/mark_all_as_read/', {});
+            if (!res?.ok) {
+                Toast.error('Không đánh dấu được thông báo');
+                return;
+            }
+            if (this.currentPage === 'notifications') await this.loadNotifications();
+        }
         Toast.success('Đã đánh dấu tất cả thông báo là đã đọc');
     },
     

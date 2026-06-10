@@ -454,8 +454,11 @@ const PageKeToanDashboard = {
     const gia_moi = parseFloat(String(document.getElementById('kg-gia-thuoc').value || ''), 10);
     if (!id || !gia_moi) return Toast.hien('Lỗi', 'Chọn thuốc và nhập giá', 'error');
     const res = await Http.tao(`/thuoc/thuoc/${id}/cap_nhat_gia/`, { gia_moi, ly_do: 'Ke toan cap nhat' });
-    if (res.ok) Toast.hien('Đã cập nhật', 'Giá bán thuốc', 'success');
-    else Toast.hien('Lỗi', (res.data && res.data.error) || 'Thất bại', 'error');
+    if (res.ok) {
+      Toast.hien('Đã cập nhật', 'Giá bán thuốc', 'success');
+      const host = document.getElementById('ketoan-main');
+      if (host) await this._capNhatGia(host);
+    } else Toast.hien('Lỗi', (res.data && res.data.error) || 'Thất bại', 'error');
   },
 
   async _postGiaVac() {
@@ -463,8 +466,11 @@ const PageKeToanDashboard = {
     const gia_tiem_moi = parseFloat(String(document.getElementById('kg-gia-vac').value || ''), 10);
     if (!id || !gia_tiem_moi) return Toast.hien('Lỗi', 'Chọn vaccine và nhập giá', 'error');
     const res = await Http.tao(`/thuoc/vaccine/${id}/cap_nhat_gia/`, { gia_tiem_moi, ly_do: 'Ke toan cap nhat' });
-    if (res.ok) Toast.hien('Đã cập nhật', 'Giá tiêm vaccine', 'success');
-    else Toast.hien('Lỗi', (res.data && res.data.error) || 'Thất bại', 'error');
+    if (res.ok) {
+      Toast.hien('Đã cập nhật', 'Giá tiêm vaccine', 'success');
+      const host = document.getElementById('ketoan-main');
+      if (host) await this._capNhatGia(host);
+    } else Toast.hien('Lỗi', (res.data && res.data.error) || 'Thất bại', 'error');
   },
 
   async _hoaDon(host) {

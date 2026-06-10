@@ -1,4 +1,5 @@
 import logging
+from django.conf import settings
 from django.shortcuts import render, get_object_or_404
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -24,7 +25,13 @@ from benhan.revenue_utils import (
 )
 from .revenue_utils import loc_don_hang_theo_ky_doanh
 from nguoidung.roles import la_nhan_vien_ban_thuoc
-from .vnpay_utils import build_payment_url, verify_vnpay_signature
+from .vnpay_utils import (
+    build_payment_url,
+    is_vnpay_portal_test_ipn,
+    verify_vnpay_signature,
+    vnpay_da_cau_hinh,
+)
+from .vnpay_notifications import gui_xac_nhan_thanh_toan_vnpay
 
 logger_dh = logging.getLogger(__name__)
 
@@ -436,6 +443,12 @@ def tao_don_hang(request):
             else DonHang.TrangThaiDuyetThuocDacThu.KHONG_CAN
         )
 
+        trang_thai_ban_dau = (
+            DonHang.TrangThai.CHO_THANH_TOAN
+            if loai_don == DonHang.LoaiDon.ONLINE
+            else DonHang.TrangThai.MOI_TAO
+        )
+
         # Tạo đơn hàng
         don_hang = DonHang.objects.create(
             ma_don_hang=ma_don_hang,
@@ -450,7 +463,7 @@ def tao_don_hang(request):
             giam_gia=giam_gia,
             tong_tien=tong_tien,
             ghi_chu=ghi_chu,
-            trang_thai='MOI_TAO',
+            trang_thai=trang_thai_ban_dau,
             trang_thai_duyet_bs=trang_duyet_bs,
         )
         
@@ -477,7 +490,7 @@ def tao_don_hang(request):
         LichSuDonHang.objects.create(
             don_hang=don_hang,
             trang_thai_cu='',
-            trang_thai_moi='MOI_TAO',
+            trang_thai_moi=trang_thai_ban_dau,
             nguoi_thay_doi=request.user,
             ghi_chu='Tạo đơn hàng mới'
         )
@@ -846,6 +859,13 @@ def thanh_toan_don_hang(request, don_hang_id):
         ok_ban_quay = _co_quyen_ban_thuoc_tai_quay(request) and don_hang.loai_don == DonHang.LoaiDon.TAI_QUAY
         if not ok_bn and not ok_nv and not ok_ban_quay:
             return JsonResponse({'success': False, 'error': 'Bạn không có quyền thanh toán đơn hàng này'}, status=403)
+
+        # Đơn online: bệnh nhân không tự xác nhận thanh toán (COD ghi nhận khi giao hàng / quầy; VNPay qua IPN).
+        if don_hang.loai_don == DonHang.LoaiDon.ONLINE and ok_bn and not ok_nv and not ok_ban_quay:
+            return JsonResponse({
+                'success': False,
+                'error': 'Đơn mua online — COD được xác nhận khi nhận hàng; VNPay qua cổng thanh toán.',
+            }, status=403)
 
         # Kiểm tra đơn hàng có thể thanh toán không
         if don_hang.trang_thai not in ['MOI_TAO', 'CHO_THANH_TOAN']:
@@ -1610,15 +1630,43 @@ def vnpay_tao_url(request, don_hang_id):
         return JsonResponse({'success': False, 'error': 'Đơn không ở trạng thái chờ thanh toán'}, status=400)
     if hasattr(don_hang, 'thanh_toan'):
         return JsonResponse({'success': False, 'error': 'Đơn đã thanh toán'}, status=400)
-    ip = request.META.get('HTTP_X_FORWARDED_FOR', request.META.get('REMOTE_ADDR', '127.0.0.1')).split(',')[0].strip()
+    if not vnpay_da_cau_hinh():
+        return JsonResponse(
+            {
+                'success': False,
+                'error': 'Chưa cấu hình VNPay trên server (VNPAY_TMN_CODE, VNPAY_HASH_SECRET, VNPAY_RETURN_URL).',
+                'configured': False,
+            },
+            status=400,
+        )
+    ip = (
+        request.META.get('HTTP_X_FORWARDED_FOR')
+        or request.META.get('REMOTE_ADDR')
+        or '127.0.0.1'
+    )
+    bill_email = (don_hang.email_nhan or '').strip()
+    if not bill_email:
+        try:
+            bill_email = (don_hang.benh_nhan.nguoi_dung.email or '').strip()
+        except Exception:
+            bill_email = ''
+    bill_mobile = (don_hang.so_dien_thoai_nhan or '').strip()
     url, err = build_payment_url(
         amount_vnd=don_hang.tong_tien,
         txn_ref=don_hang.ma_don_hang,
         order_info=f'Thanh toan {don_hang.ma_don_hang}',
         ip_addr=ip,
+        bill_email=bill_email,
+        bill_mobile=bill_mobile,
     )
     if err:
         return JsonResponse({'success': False, 'error': err, 'configured': False}, status=400)
+    logger_dh.warning(
+        'VNPay tao-url đơn %s amount=%s url_prefix=%s',
+        don_hang.ma_don_hang,
+        don_hang.tong_tien,
+        (url or '')[:120],
+    )
     return JsonResponse(
         {
             'success': True,
@@ -1635,9 +1683,24 @@ def vnpay_ipn(request):
         flat[k] = request.GET.get(k)
     for k in request.POST:
         flat[k] = request.POST.get(k)
-    ok, msg = verify_vnpay_signature(flat)
+    qs = request.META.get('QUERY_STRING', '') or ''
+    if is_vnpay_portal_test_ipn(flat):
+        logger_dh.info('VNPay IPN: Test call IPN cổng merchant (hash_test) — URL OK')
+        return JsonResponse({'RspCode': '00', 'Message': 'Confirm Success'}, status=200)
+    ok, msg = verify_vnpay_signature(flat, query_string=qs)
     if not ok:
-        logger_dh.warning('VNPay IPN: xác minh chữ ký thất bại: %s | keys=%s', msg, list(flat.keys()))
+        cfg_tmn = (getattr(settings, 'VNPAY', None) or {}).get('TMN_CODE', '')
+        req_tmn = flat.get('vnp_TmnCode', '')
+        logger_dh.warning(
+            'VNPay IPN: xác minh chữ ký thất bại: %s | keys=%s | tmn_env=%s tmn_req=%s | txn=%s',
+            msg,
+            list(flat.keys()),
+            cfg_tmn,
+            req_tmn,
+            flat.get('vnp_TxnRef', ''),
+        )
+        if cfg_tmn and req_tmn and cfg_tmn != req_tmn:
+            msg = f'Sai chữ ký — TMN .env ({cfg_tmn}) khác TMN IPN ({req_tmn}). Kiểm tra VNPAY_HASH_SECRET trên cổng merchant.'
         return JsonResponse({'RspCode': '97', 'Message': msg or 'Invalid'}, status=200)
     rsp = flat.get('vnp_ResponseCode') or ''
     status_txn = flat.get('vnp_TransactionStatus') or ''
@@ -1649,7 +1712,8 @@ def vnpay_ipn(request):
     except ValueError:
         amount_vnd = 0
 
-    if rsp != '00' or status_txn != '00':
+    # Test IPN cổng merchant có thể thiếu vnp_TransactionStatus
+    if rsp != '00' or (status_txn and status_txn != '00'):
         return JsonResponse({'RspCode': '00', 'Message': 'Ghi nhận — giao dịch không thành công'}, status=200)
 
     with transaction.atomic():
@@ -1685,6 +1749,8 @@ def vnpay_ipn(request):
             ghi_chu=f'Thanh toan VNPay IPN {ma_gd}',
         )
         _dong_bo_don_thuoc_sau_thanh_toan_tai_quay(don_hang, ThanhToan.PhuongThuc.VNPAY)
+        if don_hang.loai_don == DonHang.LoaiDon.ONLINE:
+            gui_xac_nhan_thanh_toan_vnpay(don_hang, ma_giao_dich=ma_gd)
         logger_dh.info(
             'VNPay IPN: đã thanh toán đơn %s → %s (GD %s)',
             txn_ref,
@@ -1702,7 +1768,7 @@ def vnpay_return(request):
     if request.method != 'GET':
         return JsonResponse({'success': False, 'error': 'Method not allowed'}, status=405)
     flat = {k: request.GET.get(k) for k in request.GET}
-    ok, err = verify_vnpay_signature(flat)
+    ok, err = verify_vnpay_signature(flat, query_string=request.META.get('QUERY_STRING', '') or '')
     if not ok:
         return HttpResponse(
             f'VNPay: {err or "Xác minh thất bại"}',

@@ -100,17 +100,7 @@ ${hd.ghi_chu ? `<p class="muted">Ghi chú: ${this._esc(hd.ghi_chu)}</p>` : ''}
     }
   },
 
-  async _toaDaHoanThanh(host) {
-    UI.render(
-      host,
-      `<div class="card mb-3">
-        <div class="card-header"><div class="card-title">Đơn tại quầy đã hoàn thành</div></div>
-        <div class="card-body">
-          <p class="small text-muted">Theo toa bác sĩ và bán lẻ đã thanh toán — in lại hóa đơn (có phương thức thanh toán).</p>
-          <div id="bt-list-xong"></div>
-        </div>
-      </div>`
-    );
+  async _taiDanhSachToaXong() {
     const box = document.getElementById('bt-list-xong');
     if (!box) return;
     box.innerHTML = '<p class="text-muted">Đang tải…</p>';
@@ -158,6 +148,26 @@ ${hd.ghi_chu ? `<p class="muted">Ghi chú: ${this._esc(hd.ghi_chu)}</p>` : ''}
     box.innerHTML = `<div class="table-responsive"><table class="table table-sm"><thead><tr><th>Loại</th><th>Mã toa</th><th>Mã ĐH</th><th>Bệnh nhân</th><th>Thanh toán</th><th></th></tr></thead><tbody>
       ${merged.map((m) => m.html).join('')}
     </tbody></table></div>`;
+  },
+
+  async _lamMoiSauThanhToan() {
+    const ma = document.getElementById('bt-ma-toa')?.value?.trim();
+    if (ma) await this._loadToa();
+    await this._taiDanhSachToaXong();
+  },
+
+  async _toaDaHoanThanh(host) {
+    UI.render(
+      host,
+      `<div class="card mb-3">
+        <div class="card-header"><div class="card-title">Đơn tại quầy đã hoàn thành</div></div>
+        <div class="card-body">
+          <p class="small text-muted">Theo toa bác sĩ và bán lẻ đã thanh toán — in lại hóa đơn (có phương thức thanh toán).</p>
+          <div id="bt-list-xong"></div>
+        </div>
+      </div>`
+    );
+    await this._taiDanhSachToaXong();
   },
 
   async _inLaiHoaDon(donHangId) {
@@ -328,6 +338,7 @@ ${hd.ghi_chu ? `<p class="muted">Ghi chú: ${this._esc(hd.ghi_chu)}</p>` : ''}
       document.getElementById('bt-tt-wrap').style.display = 'none';
       this._hoaDonGanNhat = null;
       this._donHangId = null;
+      await this._lamMoiSauThanhToan();
     } else Toast.loi('Lỗi', res.data?.error || '', 'error');
   },
 
@@ -820,6 +831,8 @@ ${hd.ghi_chu ? `<p class="muted">Ghi chú: ${this._esc(hd.ghi_chu)}</p>` : ''}
       this._blHoaDon = null;
       this._blDonId = null;
       this._blKhoaTaoDon(false);
+      this._blResetBanLeForm();
+      await this._taiDanhSachToaXong();
     } else Toast.loi('Lỗi', res.data?.error || '', 'error');
   },
 

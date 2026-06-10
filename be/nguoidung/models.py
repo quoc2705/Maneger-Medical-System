@@ -433,9 +433,7 @@ class BacSi(models.Model):
 class NhanVien(models.Model):
     CHUC_VU_CHOICES = [
         ('BAN_THUOC', 'Bán thuốc'),
-        ('DIEU_DUONG', 'Điều dưỡng'),
         ('LE_TAN', 'Lễ tân'),
-        ('KHO', 'Quản lý kho'),
         ('KE_TOAN', 'Kế toán'),
     ]
     
@@ -489,10 +487,8 @@ class NhanVien(models.Model):
     def get_default_permissions(self):
         default_permissions = {
             'BAN_THUOC': ['xem_kho', 'xuat_kho', 'ban_thuoc'],
-            'DIEU_DUONG': ['xem_benh_nhan', 'cham_soc', 'ghi_nhan_chi_so'],
             'LE_TAN': ['tiep_nhan', 'dat_lich', 'thanh_toan'],
-            'KHO': ['xem_kho', 'nhap_kho', 'xuat_kho', 'kiem_ke'],
-            'KE_TOAN': ['xem_doanh_thu', 'thanh_toan', 'bao_cao'],
+            'KE_TOAN': ['xem_doanh_thu', 'thanh_toan', 'bao_cao', 'xem_kho', 'nhap_kho', 'xuat_kho', 'kiem_ke'],
         }
         return default_permissions.get(self.chuc_vu, [])
     

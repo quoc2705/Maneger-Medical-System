@@ -13,8 +13,8 @@ SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-your-secret-ke
 
 DEBUG = os.environ.get('DJANGO_DEBUG', 'False').lower() == 'true'
 
-ALLOWED_HOSTS = [h.strip() for h in os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if h.strip()]
-
+# ALLOWED_HOSTS = [h.strip() for h in os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if h.strip()]
+ALLOWED_HOSTS = ['*']
 # Application definition
 INSTALLED_APPS = [
     'daphne',  # Đặt lên đầu cho WebSocket
@@ -194,10 +194,22 @@ SMS_BRAND_NAME = os.environ.get('SMS_BRAND_NAME', 'PhongKham')
 
 SESSION_COOKIE_HTTPONLY = False  # Cho phép JavaScript đọc session cookie
 
-# VNPay — Merchant đăng ký trên https://vnpay.vn/ (TMN + Hash + URL Return/ IPN khớp tuyệt đối)
-# Sandbox: PAYMENT_URL mặc định sandbox | Production: VNPAY_PAYMENT_URL=https://vnpayment.vn/paymentv2/vpcpay.html
-# RETURN_URL: trang SPA nhận query vnp_* (vd. https://ten-mien.com/payment/vnpay-return) — khai báo giống hệt trên cổng VNPAY
-# IPN_URL: endpoint công khai HTTPS để VNPAY server gọi (vd. https://ten-mien.com/api/don-hang/vnpay-ipn/)
+# URL gốc site (HTTPS khi production) — dùng ghép Return/IPN nếu không khai báo riêng
+SITE_URL = (os.environ.get('SITE_URL') or '').strip().rstrip('/')
+
+# VNPay — Merchant đăng ký trên https://vnpay.vn/
+# Khai báo Return URL / IPN URL trên cổng merchant phải khớp tuyệt đối với .env
+# Sandbox: VNPAY_PAYMENT_URL=https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
+# Production: VNPAY_PAYMENT_URL=https://vnpayment.vn/paymentv2/vpcpay.html
+_vnp_return = (
+    os.environ.get('VNPAY_RETURN_URL')
+    or os.environ.get('VNP_RETURN_URL')
+    or (f'{SITE_URL}/payment/vnpay-return' if SITE_URL else '')
+)
+_vnp_ipn = (
+    os.environ.get('VNPAY_IPN_URL')
+    or (f'{SITE_URL}/api/don-hang/vnpay-ipn/' if SITE_URL else '')
+)
 VNPAY = {
     'TMN_CODE': os.environ.get('VNPAY_TMN_CODE', ''),
     'HASH_SECRET': os.environ.get('VNPAY_HASH_SECRET', ''),
@@ -205,17 +217,26 @@ VNPAY = {
         'VNPAY_PAYMENT_URL',
         'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html',
     ),
-    # Hỗ trợ cả VNP_RETURN_URL (hay gõ nhầm trong .env) và VNPAY_RETURN_URL
-    'RETURN_URL': (
-        os.environ.get('VNPAY_RETURN_URL')
-        or os.environ.get('VNP_RETURN_URL')
-        or 'https://gumdrop-steering-tall.ngrok-free.dev/payment/vnpay-return'
-    ),
-    'IPN_URL': os.environ.get(
-        'VNPAY_IPN_URL',
-        'https://gumdrop-steering-tall.ngrok-free.dev/api/don-hang/vnpay-ipn/',
-    ),
+    'RETURN_URL': _vnp_return,
+    'IPN_URL': _vnp_ipn,
 }
+
+# Email xác nhận thanh toán VNPay (bệnh nhân mua online)
+EMAIL_ENABLED = os.environ.get('EMAIL_ENABLED', 'false').lower() == 'true'
+EMAIL_BACKEND = os.environ.get(
+    'EMAIL_BACKEND',
+    'django.core.mail.backends.smtp.EmailBackend',
+)
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '587'))
+EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'true').lower() == 'true'
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+DEFAULT_FROM_EMAIL = os.environ.get(
+    'DEFAULT_FROM_EMAIL',
+    EMAIL_HOST_USER or 'noreply@phongkham.local',
+)
+CLINIC_NAME = os.environ.get('CLINIC_NAME', 'PhòngKhám+')
 
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/'

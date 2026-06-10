@@ -166,11 +166,17 @@ class LoginSerializer(serializers.Serializer):
     password = serializers.CharField(required=True, style={'input_type': 'password'})
     
     def validate(self, data):
-        ten_dang_nhap = data.get('ten_dang_nhap')
+        ten_dang_nhap = (data.get('ten_dang_nhap') or '').strip()
         password = data.get('password')
         
         if ten_dang_nhap and password:
-            user = authenticate(username=ten_dang_nhap, password=password)
+            username = ten_dang_nhap
+            if '@' in ten_dang_nhap:
+                matched = NguoiDung.objects.filter(email__iexact=ten_dang_nhap).first()
+                if matched:
+                    username = matched.ten_dang_nhap
+
+            user = authenticate(username=username, password=password)
             
             if user:
                 if not user.is_active:
@@ -186,7 +192,7 @@ class LoginSerializer(serializers.Serializer):
             else:
                 # Ghi lại số lần đăng nhập thất bại
                 try:
-                    user = NguoiDung.objects.get(ten_dang_nhap=ten_dang_nhap)
+                    user = NguoiDung.objects.get(ten_dang_nhap=username)
                     user.login_attempts += 1
                     if user.login_attempts >= 5:
                         user.lock_account(30)  # Khóa 30 phút

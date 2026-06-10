@@ -286,19 +286,26 @@ const PageBacSiDashboard = {
       return;
     }
     el.innerHTML = results.length
-      ? `<table class="table table-sm"><thead><tr><th>STT</th><th>Giờ</th><th>Bệnh nhân</th><th>Mã BN</th><th>Phòng</th><th></th></tr></thead><tbody>
+      ? `<table class="table table-sm"><thead><tr><th>STT</th><th>Giờ</th><th>Bệnh nhân</th><th>Mã BN</th><th>Phòng</th><th>Trạng thái</th><th></th></tr></thead><tbody>
         ${results
           .map(
-            (l) => `<tr>
+            (l) => {
+              const isDang = l.trang_thai === 'DANG_KHAM';
+              const gio = (l.thoi_gian_den || l.ngay_gio_hen || '').toString().slice(11, 16);
+              const btnLabel = isDang ? 'Tiếp tục khám' : 'Mở hồ sơ khám';
+              const btnClass = isDang ? 'btn-outline-primary' : 'btn-primary';
+              return `<tr>
           <td>${this._esc(l.stt_trong_ngay ?? '—')}</td>
-          <td>${this._esc((l.ngay_gio_hen || '').toString().slice(11, 16))}</td>
+          <td>${this._esc(gio)}</td>
           <td>${this._esc(l.ten_benh_nhan || '')}</td>
           <td>${this._esc(l.ma_benh_nhan || '')}</td>
           <td>${this._esc(l.ma_phong || l.ten_phong || '—')}</td>
+          <td><span class="badge ${isDang ? 'bg-warning text-dark' : 'bg-light text-dark border'}">${this._esc(this._trangThaiLich(l.trang_thai))}</span></td>
           <td>
-            <button type="button" class="btn btn-sm btn-primary" onclick="PageBacSiDashboard._moHoSoTuLich('${l.id}')">Mở hồ sơ khám</button>
+            <button type="button" class="btn btn-sm ${btnClass}" onclick="PageBacSiDashboard._moHoSoTuLich('${l.id}')">${btnLabel}</button>
           </td>
-        </tr>`
+        </tr>`;
+            }
           )
           .join('')}
         </tbody></table>`
@@ -573,37 +580,43 @@ const PageBacSiDashboard = {
     const el = document.getElementById('bs-ds-hom-nay');
     if (!el) return;
     const res = await Http.layDanhSach(
-      '/lich-hen/lich-hen/?hom_nay=true&ordering=ngay_gio_hen&page_size=100'
+      '/lich-hen/lich-hen/?hom_nay=true&cho_kham=true&ordering=stt_trong_ngay,ngay_gio_hen&page_size=100'
     );
     const rows = (res.data && res.data.results) || [];
     if (!res.ok) {
-      el.innerHTML = '<p class="text-danger small mb-0">Không tải được danh sách lịch.</p>';
+      el.innerHTML = `<p class="text-danger small mb-0 p-3">Không tải được danh sách lịch: ${this._esc(this._msgApiLoi(res))}</p>`;
       return;
     }
     const list = (Array.isArray(rows) ? rows : []).filter(
-      (l) => l.trang_thai !== 'HOAN_THANH'
+      (l) => l.trang_thai !== 'HOAN_THANH' && l.trang_thai !== 'DA_HUY'
     );
     if (!list.length) {
       el.innerHTML =
-        '<p class="text-muted small mb-0">Không còn lịch cần khám hôm nay (lịch đã <strong>Hoàn thành</strong> không hiển thị).</p>';
+        '<p class="text-muted small mb-0 p-3">Không còn lịch cần khám hôm nay. Bệnh nhân đã check-in sẽ hiện sau khi lễ tân phân bác sĩ / lấy số.</p>';
       return;
     }
     el.innerHTML = `<div class="table-responsive"><table class="table table-sm table-hover mb-0 align-middle">
-      <thead><tr><th>Giờ</th><th>Bệnh nhân</th><th>Mã BN</th><th>Loại</th><th>Trạng thái</th><th></th></tr></thead><tbody>
+      <thead><tr><th>STT</th><th>Giờ</th><th>Bệnh nhân</th><th>Mã BN</th><th>Loại</th><th>Trạng thái</th><th></th></tr></thead><tbody>
       ${list
         .map((l) => {
           const isTiem = l.loai_lich === 'TIEM_CHUNG';
-          const btnLabel = isTiem ? 'Tiêm chủng' : 'Mở hồ sơ khám';
-          const btnClass = isTiem ? 'btn-info text-white' : 'btn-primary';
+          const isDang = l.trang_thai === 'DANG_KHAM';
+          const isCurrent = this._lichHenId && String(l.id) === String(this._lichHenId);
+          const btnLabel = isTiem ? (isDang ? 'Tiếp tục tiêm' : 'Tiêm chủng') : isDang ? 'Tiếp tục khám' : 'Mở hồ sơ khám';
+          const btnClass = isTiem ? 'btn-info text-white' : isDang ? 'btn-outline-primary' : 'btn-primary';
           const loaiBadge = isTiem
             ? '<span class="badge bg-info text-white">Tiêm chủng</span>'
             : `<span class="badge bg-light text-dark border">${this._esc(l.loai_lich_display || this._loaiLichLabel(l.loai_lich))}</span>`;
-          return `<tr>
-        <td>${this._esc((l.ngay_gio_hen || '').toString().slice(11, 16))}</td>
+          const stt = l.stt_trong_ngay != null ? String(l.stt_trong_ngay) : '—';
+          const gio = (l.thoi_gian_den || l.ngay_gio_hen || '').toString().slice(11, 16);
+          const rowCls = isCurrent ? 'table-primary' : '';
+          return `<tr class="${rowCls}">
+        <td>${this._esc(stt)}</td>
+        <td>${this._esc(gio)}</td>
         <td>${this._esc(l.ten_benh_nhan || '')}</td>
         <td>${this._esc(l.ma_benh_nhan || '')}</td>
         <td>${loaiBadge}</td>
-        <td><span class="badge bg-light text-dark border">${this._esc(this._trangThaiLich(l.trang_thai))}</span></td>
+        <td><span class="badge ${isDang ? 'bg-warning text-dark' : 'bg-light text-dark border'}">${this._esc(this._trangThaiLich(l.trang_thai))}</span></td>
         <td class="text-end">
           <button type="button" class="btn btn-sm ${btnClass}" onclick="PageBacSiDashboard._moHoSoTuLich('${l.id}')">${btnLabel}</button>
         </td>
@@ -611,7 +624,7 @@ const PageBacSiDashboard = {
         })
         .join('')}
       </tbody></table></div>
-      <p class="text-muted small mt-2 mb-0">Lịch <strong>tiêm chủng</strong> mở thẳng màn ghi tiêm; lịch khám mở hồ sơ lần khám.</p>`;
+      <p class="text-muted small mt-2 mb-0 px-3 pb-2">Gồm BN <strong>chờ khám</strong> và <strong>đang khám</strong> (do lễ tân phân). Dòng xanh = BN đang mở hồ sơ.</p>`;
   },
 
   async _hoSoList(host) {
@@ -654,9 +667,13 @@ const PageBacSiDashboard = {
       </div>`);
     await this._loadDsLichHomNay();
     if (qVal) await this._timHoSo();
+    if (this._hoSoId && !this._hoSoXemChiTietTraCuu) {
+      await this._loadChiTietHoSo(this._hoSoId, { traCuu: false });
+    }
   },
 
   async _guessTimTuBn() {
+    if (this._patientSnapshot?.maBn) return this._patientSnapshot.maBn;
     if (!this._benhNhanId) return '';
     const res = await Http.layDanhSach(`/benh-nhan/${this._benhNhanId}/`);
     if (res.ok && res.data && res.data.ma_benh_nhan) return res.data.ma_benh_nhan;
@@ -1258,6 +1275,7 @@ const PageBacSiDashboard = {
       this._refreshPatientStrip();
       const nx = document.getElementById('bs-cd-next');
       if (nx) nx.style.display = 'block';
+      if (this._hoSoId) await this._loadChiTietHoSo(this._hoSoId, { traCuu: false });
     } else Toast.loi('Lỗi lưu', (res.data && (res.data.detail || res.data.error)) || '', 'error');
   },
 

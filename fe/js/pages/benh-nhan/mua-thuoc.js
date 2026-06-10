@@ -167,6 +167,10 @@ const PageMuaThuoc = {
               <label style="font-size:13px">Số điện thoại nhận *</label>
               <input type="text" id="bn-order-phone" class="form-control" placeholder="SĐT người nhận">
             </div>
+            <div class="form-group" style="margin-bottom:8px">
+              <label style="font-size:13px">Email nhận xác nhận <span id="bn-email-required" class="text-muted">(bắt buộc khi VNPay)</span></label>
+              <input type="email" id="bn-order-email" class="form-control" placeholder="Email tài khoản đã đăng ký">
+            </div>
             <div class="form-group" style="margin-bottom:0">
               <label style="font-size:13px">Địa chỉ giao hàng *</label>
               <textarea id="bn-order-address" class="form-control" rows="2" placeholder="Số nhà, đường, phường..."></textarea>
@@ -381,6 +385,7 @@ const PageMuaThuoc = {
       return Toast.loi('Không thể thêm vào giỏ', addRes?.data?.error || 'Có lỗi xảy ra');
     }
     await this.taiGioHang();
+    await this.taiSanPham();
   },
 
   async capNhatSoLuong(itemId, delta) {
@@ -394,6 +399,7 @@ const PageMuaThuoc = {
         return Toast.loi('Không thể xóa khỏi giỏ', removeRes?.data?.error || 'Có lỗi xảy ra');
       }
       await this.taiGioHang();
+      await this.taiSanPham();
       return;
     }
     if (next > this._gio[idx].ton_kho) return Toast.canh('Quá tồn kho', 'Không thể thêm vượt số lượng tồn');
@@ -403,6 +409,7 @@ const PageMuaThuoc = {
       return Toast.loi('Không thể cập nhật giỏ', updateRes?.data?.error || 'Có lỗi xảy ra');
     }
     await this.taiGioHang();
+    await this.taiSanPham();
   },
 
   async taiGioHang() {
@@ -446,9 +453,13 @@ const PageMuaThuoc = {
       this._userMe = meRes?.data || null;
     }
     const phoneInput = document.getElementById('bn-order-phone');
+    const emailInput = document.getElementById('bn-order-email');
     const addrInput = document.getElementById('bn-order-address');
     if (phoneInput && !phoneInput.value) {
       phoneInput.value = this._userMe?.so_dien_thoai || '';
+    }
+    if (emailInput && !emailInput.value) {
+      emailInput.value = this._userMe?.email || '';
     }
     if (addrInput && !addrInput.value) {
       addrInput.value = this._userMe?.dia_chi || '';
@@ -508,10 +519,15 @@ const PageMuaThuoc = {
 
     const tenNguoiNhan = (me.ho_ten || userRaw.ho_ten || '').trim();
     const sdtNhan = (document.getElementById('bn-order-phone')?.value || '').trim();
+    const emailNhan = (document.getElementById('bn-order-email')?.value || me.email || userRaw.email || '').trim();
     const diaChi = (document.getElementById('bn-order-address')?.value || '').trim();
+    const paymentMethod = (document.getElementById('bn-order-payment')?.value || 'COD').toUpperCase();
 
     if (!tenNguoiNhan || !sdtNhan || !diaChi) {
       return Toast.loi('Thiếu thông tin nhận hàng', 'Cần họ tên, số điện thoại và địa chỉ giao hàng');
+    }
+    if (paymentMethod === 'VNPAY' && !emailNhan) {
+      return Toast.loi('Thiếu email', 'VNPay cần email để gửi biên lai và xác nhận thanh toán');
     }
 
     const createRes = await Http.tao('/don-hang/don-hang/tao/', {
@@ -519,7 +535,7 @@ const PageMuaThuoc = {
       loai_don: 'ONLINE',
       ten_nguoi_nhan: tenNguoiNhan,
       so_dien_thoai_nhan: sdtNhan,
-      email_nhan: me.email || userRaw.email || '',
+      email_nhan: emailNhan,
       dia_chi_giao_hang: diaChi,
       phi_ship: 0,
       giam_gia: 0,
@@ -532,7 +548,6 @@ const PageMuaThuoc = {
 
     const donHangId = createRes?.data?.data?.don_hang_id;
     const maDon = createRes?.data?.data?.ma_don_hang || '—';
-    const paymentMethod = (document.getElementById('bn-order-payment')?.value || 'COD').toUpperCase();
 
     this._gio = [];
     this.renderGio();
@@ -558,17 +573,12 @@ const PageMuaThuoc = {
       return;
     }
 
-    if (donHangId && paymentMethod === 'COD') {
-      const payRes = await Http.tao(`/don-hang/don-hang/${donHangId}/thanh-toan/`, {
-        phuong_thuc: 'COD',
-        noi_dung: 'Thanh toán khi nhận hàng (COD)'
-      });
-      if (!payRes?.ok) {
-        Toast.canh('Đã tạo đơn nhưng ghi nhận COD chưa thành công', payRes?.data?.error || 'Bạn có thể xem đơn và liên hệ quầy');
-      }
-    }
-
-    Toast.ok('Tạo đơn thành công', `Mã đơn: ${maDon}`);
+    Toast.ok(
+      'Tạo đơn thành công',
+      paymentMethod === 'COD'
+        ? `Mã đơn: ${maDon} — Thanh toán COD khi nhận hàng`
+        : `Mã đơn: ${maDon}`
+    );
     if (window.PageBenhNhanDashboard) {
       await window.PageBenhNhanDashboard.chuyenTrang('don-hang');
     }

@@ -1,13 +1,21 @@
 """
-VNPay 2.1.0 — HMAC-SHA512: chuỗi ký dùng giá trị đã encode (quote_plus / x-www-form-urlencoded);
-URL redirect cũng quote_plus từng value (khớp tài liệu changeTypeHash).
+VNPay 2.1.0 — HMAC-SHA512.
+
+Tạo URL: khớp sample PHP chính thức (urlencode key + value, sort alphabet).
+Verify IPN/Return: thử cả PHP (giữ vnp_SecureHashType) và Node (bỏ SecureHashType).
 """
 import hashlib
 import hmac
+import logging
 import unicodedata
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlencode
 
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
+
+_SIGN_EXCLUDE_VERIFY = frozenset({'vnp_SecureHash', 'vnp_SecureHashType'})
+_SIGN_EXCLUDE_CREATE = frozenset({'vnp_SecureHash', 'vnp_SecureHashType'})
 
 
 def _cfg():
@@ -16,6 +24,16 @@ def _cfg():
 
 def _secret_raw(cfg):
     return (cfg.get('HASH_SECRET') or '').strip()
+
+
+def _normalize_vnpay_ip(ip: str) -> str:
+    """VNPay yêu cầu IPv4 — chuẩn hóa IP từ proxy/ngrok."""
+    ip = (ip or '127.0.0.1').split(',')[0].strip()
+    if ip.startswith('::ffff:'):
+        ip = ip[7:]
+    if ':' in ip:
+        return '127.0.0.1'
+    return ip[:45] or '127.0.0.1'
 
 
 def _order_info_ascii(text, max_len=255):
@@ -36,41 +54,69 @@ def _hmac_sha512_hex(secret: str, message: str) -> str:
     ).hexdigest()
 
 
-def _build_sign_string(params: dict, exclude: frozenset) -> str:
-    """
-    Chuỗi ký VNPAY 2.1.0 (HMAC-SHA512): sort key, bỏ hash; mỗi cặp key=value
-    với value đã encode kiểu application/x-www-form-urlencoded (tương đương
-    PHP urlencode / Java URLEncoder.encode), KHÔNG ký trên giá trị thô.
-    Bỏ qua tham số có giá trị rỗng (khớp sample Java trong tài liệu VNPAY).
-    """
-    keys = sorted(
-        k
-        for k in params.keys()
-        if k.startswith('vnp_') and k not in exclude
-    )
-    parts = []
-    for k in keys:
+def _sign_items(params: dict, *, exclude: frozenset):
+    items = []
+    for k in sorted(params.keys()):
+        if not k.startswith('vnp_') or k in exclude:
+            continue
         v = params.get(k)
         if v is None:
             continue
         val = str(v)
         if val == '':
             continue
-        enc_val = quote_plus(val, safe='')
-        parts.append(f'{k}={enc_val}')
-    return '&'.join(parts)
+        items.append((k, val))
+    return items
 
 
-def _payment_redirect_query(data: dict) -> str:
-    """Ghép query redirect: quote_plus từng value, không dùng urlencode(dict)."""
-    parts = []
-    for k in sorted(data.keys()):
-        v = data[k]
-        parts.append(f'{k}={quote_plus(str(v), safe="")}')
-    return '&'.join(parts)
+def build_sign_data_encoded(params: dict, *, exclude: frozenset) -> str:
+    """PHP urlencode(key)=urlencode(value) — dùng khi tạo URL thanh toán."""
+    items = _sign_items(params, exclude=exclude)
+    return '&'.join(f'{quote_plus(k)}={quote_plus(v)}' for k, v in items)
 
 
-def verify_vnpay_signature(params: dict):
+def build_sign_data_raw(params: dict, *, exclude: frozenset) -> str:
+    """Node qs.stringify(encode:false) — key=value không encode."""
+    items = _sign_items(params, exclude=exclude)
+    return '&'.join(f'{k}={v}' for k, v in items)
+
+
+def build_sign_data_urlencode(params: dict, *, exclude: frozenset) -> str:
+    """URLSearchParams / urllib urlencode — chỉ encode value."""
+    items = _sign_items(params, exclude=exclude)
+    return urlencode(items, quote_via=quote_plus)
+
+
+def _hmac_matches(secret: str, sign_data: str, recv: str) -> bool:
+    if not sign_data or not recv:
+        return False
+    calc = _hmac_sha512_hex(secret, sign_data)
+    return hmac.compare_digest(calc.lower(), recv.strip().lower())
+
+
+def _verify_variants(params: dict):
+    """Trả về (sign_data, tên_variant) nếu khớp, else None."""
+    secret = _secret_raw(_cfg())
+    recv = (params.get('vnp_SecureHash') or '').strip()
+    if not secret or not recv:
+        return None
+
+    # PHP IPN chính thức: chỉ bỏ vnp_SecureHash, giữ vnp_SecureHashType
+    php_exclude = frozenset({'vnp_SecureHash'})
+    variants = [
+        ('php_encoded_keep_type', build_sign_data_encoded(params, exclude=php_exclude)),
+        ('php_raw_keep_type', build_sign_data_raw(params, exclude=php_exclude)),
+        ('node_encoded', build_sign_data_urlencode(params, exclude=_SIGN_EXCLUDE_VERIFY)),
+        ('node_raw', build_sign_data_raw(params, exclude=_SIGN_EXCLUDE_VERIFY)),
+        ('node_encoded_keyval', build_sign_data_encoded(params, exclude=_SIGN_EXCLUDE_VERIFY)),
+    ]
+    for name, sign_data in variants:
+        if _hmac_matches(secret, sign_data, recv):
+            return sign_data, name
+    return None
+
+
+def verify_vnpay_signature(params: dict, query_string: str = ''):
     cfg = _cfg()
     secret = _secret_raw(cfg)
     if not secret:
@@ -80,23 +126,42 @@ def verify_vnpay_signature(params: dict):
     if not recv:
         return False, 'Thiếu vnp_SecureHash'
 
-    variants = (
-        frozenset({'vnp_SecureHash'}),
-        frozenset({'vnp_SecureHash', 'vnp_SecureHashType'}),
+    matched = _verify_variants(params)
+    if matched:
+        _, variant = matched
+        logger.debug('VNPay verify OK (%s)', variant)
+        return True, None
+
+    # Log debug — không ghi secret
+    php_exclude = frozenset({'vnp_SecureHash'})
+    previews = {
+        'php_keep_type': build_sign_data_encoded(params, exclude=php_exclude)[:100],
+        'node_raw': build_sign_data_raw(params, exclude=_SIGN_EXCLUDE_VERIFY)[:100],
+    }
+    logger.warning(
+        'VNPay verify fail | secret_len=%s recv=%s… | previews=%s | params=%s | qs_len=%s',
+        len(secret),
+        recv[:16],
+        previews,
+        {k: params[k] for k in sorted(params) if k.startswith('vnp_')},
+        len(query_string or ''),
     )
-    recv_l = recv.lower()
-    for ex in variants:
-        sign_data = _build_sign_string(params, ex)
-        calc = _hmac_sha512_hex(secret, sign_data)
-        try:
-            if hmac.compare_digest(calc.lower(), recv_l):
-                return True, None
-        except (TypeError, ValueError):
-            continue
     return False, 'Sai chữ ký'
 
 
 verify_ipn_params = verify_vnpay_signature
+
+
+def is_vnpay_portal_test_ipn(params: dict) -> bool:
+    """
+    Nút «Test call IPN» trên cổng merchant sandbox gửi dữ liệu giả:
+    vnp_SecureHash=hash_test, vnp_BankCode=BANK_TEST, vnp_TxnRef=222222.
+    Chỉ kiểm tra URL có nhận request — không có HMAC thật.
+    """
+    sh = (params.get('vnp_SecureHash') or '').strip().lower()
+    bank = (params.get('vnp_BankCode') or '').strip()
+    txn = (params.get('vnp_TxnRef') or '').strip()
+    return sh in ('hash_test', 'test') and bank == 'BANK_TEST' and txn == '222222'
 
 
 def create_payment_url(
@@ -106,13 +171,14 @@ def create_payment_url(
     order_info,
     ip_addr,
     locale='vn',
+    bill_email='',
+    bill_mobile='',
 ):
     cfg = _cfg()
     tmn = (cfg.get('TMN_CODE') or '').strip()
     secret = _secret_raw(cfg)
     pay_url = (cfg.get('PAYMENT_URL') or '').strip() or 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html'
     return_url = (cfg.get('RETURN_URL') or '').strip()
-    ipn_url = (cfg.get('IPN_URL') or '').strip()
 
     if not (tmn and secret and return_url):
         return None, 'Chưa cấu hình settings.VNPAY (TMN_CODE, HASH_SECRET, RETURN_URL)'
@@ -124,6 +190,7 @@ def create_payment_url(
     if amount <= 0:
         return None, 'Số tiền không hợp lệ'
 
+    # Tham số cốt lõi — khớp sample VNPay 2.1.0 + thư viện vnpay (URL encoded)
     data = {
         'vnp_Version': '2.1.0',
         'vnp_Command': 'pay',
@@ -136,23 +203,48 @@ def create_payment_url(
         'vnp_Locale': locale if locale in ('vn', 'en') else 'vn',
         'vnp_ReturnUrl': return_url,
         'vnp_CreateDate': create_date,
-        'vnp_IpAddr': (ip_addr or '127.0.0.1')[:45],
+        'vnp_IpAddr': _normalize_vnpay_ip(ip_addr),
     }
-    if ipn_url:
-        data['vnp_IpnUrl'] = ipn_url
 
-    sign_data = _build_sign_string(data, frozenset({'vnp_SecureHash'}))
-    data['vnp_SecureHash'] = _hmac_sha512_hex(secret, sign_data)
+    # HMAC-SHA512: quote_plus từng value (space → +), sort alphabet
+    sign_data = build_sign_data_urlencode(data, exclude=_SIGN_EXCLUDE_CREATE)
+    secure_hash = _hmac_sha512_hex(secret, sign_data)
+    full_url = f'{pay_url}?{sign_data}&vnp_SecureHash={secure_hash}'
+    logger.warning(
+        'VNPay tạo URL txn=%s amount=%s sign_len=%s return=%s',
+        txn_ref,
+        amount,
+        len(sign_data),
+        return_url[:60],
+    )
+    return full_url, None
 
-    qs = _payment_redirect_query(data)
-    return f'{pay_url}?{qs}', None
 
-
-def build_payment_url(*, amount_vnd, txn_ref, order_info, ip_addr, locale='vn'):
+def build_payment_url(
+    *,
+    amount_vnd,
+    txn_ref,
+    order_info,
+    ip_addr,
+    locale='vn',
+    bill_email='',
+    bill_mobile='',
+):
     return create_payment_url(
         amount_vnd=amount_vnd,
         txn_ref=txn_ref,
         order_info=order_info,
         ip_addr=ip_addr,
         locale=locale,
+        bill_email=bill_email,
+        bill_mobile=bill_mobile,
+    )
+
+
+def vnpay_da_cau_hinh() -> bool:
+    cfg = _cfg()
+    return bool(
+        (cfg.get('TMN_CODE') or '').strip()
+        and _secret_raw(cfg)
+        and (cfg.get('RETURN_URL') or '').strip()
     )

@@ -1,5 +1,5 @@
 from django.shortcuts import get_object_or_404, redirect
-from django.db import transaction
+from django.db import transaction, IntegrityError
 from django.db.models import Q, Count, Avg, Sum
 from django.utils import timezone
 from django.core.exceptions import PermissionDenied, ValidationError as DjangoValidationError
@@ -1162,7 +1162,10 @@ def admin_bac_si_api(request, pk=None):
         if serializer.is_valid():
             bac_si = serializer.save()
             return Response(BacSiSerializer(bac_si).data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {'error': 'Dữ liệu bác sĩ không hợp lệ', 'details': serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST
+        )
     
     elif request.method == 'PUT':
         try:
@@ -1329,7 +1332,10 @@ def admin_benh_nhan_api(request, pk=None):
             )
             
             return Response(BenhNhanSerializer(benh_nhan).data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {'error': 'Dữ liệu bệnh nhân không hợp lệ', 'details': serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST
+        )
     
     elif request.method == 'PUT':
         try:
@@ -1393,8 +1399,14 @@ def admin_benh_nhan_api(request, pk=None):
                     return Response({'error': 'Mật khẩu phải có ít nhất 8 ký tự'}, 
                                   status=status.HTTP_400_BAD_REQUEST)
             
-            nguoi_dung.save()
-            benh_nhan.save()
+            try:
+                nguoi_dung.save()
+                benh_nhan.save()
+            except IntegrityError:
+                return Response(
+                    {'error': 'Email hoặc số điện thoại đã được sử dụng'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
             
             # Ghi nhật ký
             NhatKyHoatDong.objects.create(
@@ -1407,8 +1419,9 @@ def admin_benh_nhan_api(request, pk=None):
             serializer = BenhNhanSerializer(benh_nhan)
             return Response(serializer.data)
             
-        except DjangoValidationError:
-            return Response({'error': 'ID bệnh nhân không hợp lệ'}, status=status.HTTP_400_BAD_REQUEST)
+        except DjangoValidationError as e:
+            details = getattr(e, 'message_dict', None) or {'non_field_errors': [str(e)]}
+            return Response({'error': 'Dữ liệu không hợp lệ', 'details': details}, status=status.HTTP_400_BAD_REQUEST)
         except BenhNhan.DoesNotExist:
             try:
                 nguoi_dung = NguoiDung.objects.get(pk=pk, vai_tro='BENH_NHAN', deleted_at__isnull=True)

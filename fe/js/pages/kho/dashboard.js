@@ -1,5 +1,5 @@
 /**
- * Nhân viên chức vụ Quản lý kho — tồn kho, nhập/xuất thuốc & vaccine, cảnh báo.
+ * Module quản lý kho (nhúng trong dashboard kế toán) — tồn kho, nhập/xuất thuốc & vaccine, cảnh báo.
  */
 const PageKhoDashboard = {
   _mainHostId: 'kho-main',

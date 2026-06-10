@@ -47,6 +47,44 @@ def _stt_ke_tiep_trong_ngay(ngay_date):
     return (agg['m'] or 0) + 1
 
 
+def _filter_lich_trong_ngay(queryset, ngay_date):
+    """Lịch thuộc ngày: theo giờ hẹn hoặc giờ check-in (hàng chờ lễ tân phân)."""
+    h0, h1 = _khoang_ngay_trong_tz(ngay_date)
+    return queryset.filter(
+        Q(ngay_gio_hen__gte=h0, ngay_gio_hen__lt=h1)
+        | Q(thoi_gian_den__gte=h0, thoi_gian_den__lt=h1)
+    )
+
+
+TRANG_THAI_DANG_CHO_KHAM = ('CHECKED_IN', 'DANG_KHAM')
+
+
+def _loi_benh_nhan_dang_cho_kham(benh_nhan, exclude_lich_id=None):
+    """
+    Bệnh nhân đã có lịch chờ khám (CHECKED_IN) hoặc đang khám (DANG_KHAM) —
+    không tiếp nhận / gán thêm lịch khác.
+    """
+    qs = LichHen.objects.filter(
+        benh_nhan=benh_nhan,
+        trang_thai__in=TRANG_THAI_DANG_CHO_KHAM,
+    )
+    if exclude_lich_id:
+        qs = qs.exclude(pk=exclude_lich_id)
+    existing = qs.select_related('bac_si__nguoi_dung').order_by('-ngay_cap_nhat').first()
+    if not existing:
+        return None
+    stt = existing.stt_trong_ngay if existing.stt_trong_ngay is not None else '—'
+    tt = existing.get_trang_thai_display()
+    ma = existing.ma_lich_hen or str(existing.pk)
+    extra = ''
+    if existing.bac_si_id and existing.bac_si.nguoi_dung:
+        extra = f', BS {existing.bac_si.nguoi_dung.ho_ten}'
+    return (
+        f'Bệnh nhân đang có lịch {ma} (STT {stt}, {tt}{extra}). '
+        f'Hoàn tất lượt khám hiện tại trước khi tiếp nhận hoặc gán lịch mới.'
+    )
+
+
 def _loi_bac_si_khong_co_ca(bac_si, ngay_gio_hen):
     """Trả về chuỗi lỗi nếu BS không đăng ký ca; None nếu hợp lệ."""
     local = timezone.localtime(ngay_gio_hen) if timezone.is_aware(ngay_gio_hen) else ngay_gio_hen
@@ -130,7 +168,7 @@ class LichHenViewSet(viewsets.ModelViewSet):
         'ma_lich_hen', 'benh_nhan__nguoi_dung__ho_ten', 
         'benh_nhan__ma_benh_nhan', 'ghi_chu'
     ]
-    ordering_fields = ['ngay_gio_hen', 'ngay_tao', 'trang_thai']
+    ordering_fields = ['ngay_gio_hen', 'ngay_tao', 'trang_thai', 'stt_trong_ngay']
 
     def get_serializer_class(self):
         if self.action == 'retrieve':
@@ -159,12 +197,16 @@ class LichHenViewSet(viewsets.ModelViewSet):
                 _, en = _khoang_ngay_trong_tz(dd)
                 queryset = queryset.filter(ngay_gio_hen__lt=en)
 
-        # Filter theo hôm nay
+        # Filter theo hôm nay (giờ hẹn hoặc giờ check-in)
         hom_nay = self.request.query_params.get('hom_nay')
         if hom_nay == 'true':
-            hn = _ngay_local_hien_tai()
-            h0, h1 = _khoang_ngay_trong_tz(hn)
-            queryset = queryset.filter(ngay_gio_hen__gte=h0, ngay_gio_hen__lt=h1)
+            queryset = _filter_lich_trong_ngay(queryset, _ngay_local_hien_tai())
+
+        cho_kham = self.request.query_params.get('cho_kham')
+        if cho_kham == 'true':
+            queryset = queryset.filter(
+                trang_thai__in=['CHECKED_IN', 'DANG_KHAM', 'DA_XAC_NHAN', 'DA_DAT']
+            )
 
         # Filter theo tuần này
         tuan_nay = self.request.query_params.get('tuan_nay')
@@ -179,12 +221,12 @@ class LichHenViewSet(viewsets.ModelViewSet):
         if user.vai_tro == 'BENH_NHAN' and hasattr(user, 'benh_nhan'):
             queryset = queryset.filter(benh_nhan=user.benh_nhan)
         elif user.vai_tro == 'BAC_SI' and hasattr(user, 'bac_si'):
-            # Lịch gán cho BS + lịch đang khám qua LichKham/Hồ sơ (tránh 404 khi LichHen.bac_si chưa cập nhật)
             bs = user.bac_si
             queryset = queryset.filter(
                 Q(bac_si=bs)
                 | Q(lich_kham__bac_si=bs)
                 | Q(lich_kham__ho_so_benh_an__bac_si=bs)
+                | Q(bac_si__isnull=True, trang_thai='CHECKED_IN')
             ).distinct()
         # NHAN_VIEN / ADMIN: xem toàn bộ (không lọc)
 
@@ -315,6 +357,9 @@ class LichHenViewSet(viewsets.ModelViewSet):
         if request.user.vai_tro not in ['NHAN_VIEN', 'BAC_SI', 'ADMIN'] and not request.user.is_superuser:
             return Response({'error': 'Không có quyền check-in'}, status=status.HTTP_403_FORBIDDEN)
         lich_hen = self.get_object()
+        loi_cho = _loi_benh_nhan_dang_cho_kham(lich_hen.benh_nhan, exclude_lich_id=lich_hen.pk)
+        if loi_cho:
+            return Response({'error': loi_cho}, status=status.HTTP_400_BAD_REQUEST)
         if lich_hen.trang_thai in ('HOAN_THANH', 'DA_HUY', 'VANG_MAT', 'DANG_KHAM', 'CHECKED_IN'):
             return Response(
                 {'error': f'Lịch đang ở trạng thái {lich_hen.trang_thai}, không thể check-in'},
@@ -418,6 +463,9 @@ class LichHenViewSet(viewsets.ModelViewSet):
         if request.user.vai_tro not in ['NHAN_VIEN', 'BAC_SI', 'ADMIN'] and not request.user.is_superuser:
             return Response({'error': 'Không có quyền phân công'}, status=status.HTTP_403_FORBIDDEN)
         lich_hen = self.get_object()
+        loi_cho = _loi_benh_nhan_dang_cho_kham(lich_hen.benh_nhan, exclude_lich_id=lich_hen.pk)
+        if loi_cho:
+            return Response({'error': loi_cho}, status=status.HTTP_400_BAD_REQUEST)
         ser = PhanCongBacSiSerializer(data=request.data)
         if not ser.is_valid():
             return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -451,6 +499,9 @@ class LichHenViewSet(viewsets.ModelViewSet):
         if request.user.vai_tro not in ['NHAN_VIEN', 'BAC_SI', 'ADMIN'] and not request.user.is_superuser:
             return Response({'error': 'Không có quyền phân công phòng'}, status=status.HTTP_403_FORBIDDEN)
         lich_hen = self.get_object()
+        loi_cho = _loi_benh_nhan_dang_cho_kham(lich_hen.benh_nhan, exclude_lich_id=lich_hen.pk)
+        if loi_cho:
+            return Response({'error': loi_cho}, status=status.HTTP_400_BAD_REQUEST)
         ser = PhanCongPhongSerializer(data=request.data)
         if not ser.is_valid():
             return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -469,6 +520,9 @@ class LichHenViewSet(viewsets.ModelViewSet):
         if not ser.is_valid():
             return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
         bn = get_object_or_404(BenhNhan.objects.select_related('nguoi_dung'), pk=ser.validated_data['benh_nhan'])
+        loi_cho = _loi_benh_nhan_dang_cho_kham(bn)
+        if loi_cho:
+            return Response({'error': loi_cho}, status=status.HTTP_400_BAD_REQUEST)
         now = timezone.now()
         ngay = timezone.localdate(now)
         tu_dong = ser.validated_data.get('tu_dong_chon_bac_si', True)
@@ -533,16 +587,22 @@ class LichHenViewSet(viewsets.ModelViewSet):
         return Response(LichHenDetailSerializer(lich_hen).data, status=status.HTTP_201_CREATED)
 
     def _qs_letan_hom_nay(self, request, ngay):
-        """Queryset lịch trong ngày cho lễ tân (áp quyền giống get_queryset)."""
-        start, end = _khoang_ngay_trong_tz(ngay)
+        """Queryset lịch trong ngày (giờ hẹn hoặc giờ check-in)."""
         qs = LichHen.objects.select_related(
             'benh_nhan__nguoi_dung', 'bac_si__nguoi_dung', 'nhan_vien_tao__nguoi_dung'
-        ).filter(ngay_gio_hen__gte=start, ngay_gio_hen__lt=end)
+        )
+        qs = _filter_lich_trong_ngay(qs, ngay)
         user = request.user
         if user.vai_tro == 'BENH_NHAN' and hasattr(user, 'benh_nhan'):
             qs = qs.filter(benh_nhan=user.benh_nhan)
         elif user.vai_tro == 'BAC_SI' and hasattr(user, 'bac_si'):
-            qs = qs.filter(bac_si=user.bac_si)
+            bs = user.bac_si
+            qs = qs.filter(
+                Q(bac_si=bs)
+                | Q(lich_kham__bac_si=bs)
+                | Q(lich_kham__ho_so_benh_an__bac_si=bs)
+                | Q(bac_si__isnull=True, trang_thai='CHECKED_IN')
+            ).distinct()
         return qs
 
     @action(detail=False, methods=['get'], url_path='hom_nay_letan')
@@ -575,7 +635,11 @@ class LichHenViewSet(viewsets.ModelViewSet):
         ngay = parse_date(ngay_raw) if ngay_raw else _ngay_local_hien_tai()
         if not ngay:
             ngay = _ngay_local_hien_tai()
-        qs = self._qs_letan_hom_nay(request, ngay).filter(trang_thai='CHECKED_IN')
+        qs = self._qs_letan_hom_nay(request, ngay)
+        if user.vai_tro == 'BAC_SI' and hasattr(user, 'bac_si'):
+            qs = qs.filter(trang_thai__in=['CHECKED_IN', 'DANG_KHAM'])
+        else:
+            qs = qs.filter(trang_thai='CHECKED_IN')
         qs = qs.order_by('stt_trong_ngay', 'ngay_gio_hen', 'ma_lich_hen')
         page = self.paginate_queryset(qs)
         ser = LichHenSerializer(page if page is not None else qs, many=True)

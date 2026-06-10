@@ -151,20 +151,39 @@ const PageBenhNhanDashboard = {
     UI.render('bn-all-orders', `
       <div class="table-wrap">
         <table class="table">
-          <thead><tr><th>Mã đơn</th><th>Ngày</th><th>Tổng tiền</th><th>Trạng thái</th></tr></thead>
+          <thead><tr><th>Mã đơn</th><th>Ngày</th><th>Tổng tiền</th><th>Trạng thái</th><th></th></tr></thead>
           <tbody>
-            ${items.map(d => `
+            ${items.map(d => {
+              const choTt = d.trang_thai === 'CHO_THANH_TOAN' && !d.phuong_thuc;
+              return `
               <tr>
                 <td>${this._esc(d.ma_don_hang || '—')}</td>
                 <td>${UI.formatNgay(d.ngay_tao)}</td>
                 <td>${UI.formatTien(d.tong_tien || 0)}</td>
                 <td>${UI.badge(d.trang_thai_display || d.trang_thai || '')}</td>
-              </tr>
-            `).join('')}
+                <td>${choTt ? `<button type="button" class="btn btn-primary btn-sm" onclick="PageBenhNhanDashboard.thanhToanVnpay('${d.id}')"><i class="fas fa-qrcode"></i> VNPay</button>` : ''}</td>
+              </tr>`;
+            }).join('')}
           </tbody>
         </table>
       </div>
     `);
+  },
+
+  async thanhToanVnpay(donHangId) {
+    if (!donHangId) return Toast.loi('Lỗi', 'Không xác định được đơn hàng');
+    const vnp = await Http.tao(`/don-hang/don-hang/${donHangId}/vnpay-tao-url/`, {});
+    if (!vnp?.ok || !vnp?.data?.success) {
+      return Toast.loi(
+        'Không mở được VNPay',
+        vnp?.data?.error || 'Kiểm tra cấu hình VNPAY_TMN_CODE, VNPAY_HASH_SECRET trên server'
+      );
+    }
+    const payUrl = vnp.data?.data?.payment_url;
+    const maDon = vnp.data?.data?.txn_ref || '—';
+    if (!payUrl) return Toast.loi('VNPay', 'Không nhận được link thanh toán');
+    Toast.canh('Chuyển đến cổng VNPay', `Đơn ${maDon} — hoàn tất thanh toán để xác nhận.`);
+    window.location.href = payUrl;
   },
 
   async _loadStat() {

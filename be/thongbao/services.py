@@ -6,7 +6,7 @@ from nguoidung.models import NguoiDung, NhanVien, ThongBao
 
 from .models import ThongBaoPhatHanh
 
-# Chức vụ được phép chọn khi gửi thông báo theo phạm vi CHUC_VU (không gồm điều dưỡng / quản lý kho)
+# Chức vụ được phép chọn khi gửi thông báo theo phạm vi CHUC_VU
 CHUC_VU_PHAT_HANH = frozenset({'BAN_THUOC', 'LE_TAN', 'KE_TOAN'})
 
 

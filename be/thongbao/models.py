@@ -139,7 +139,7 @@ class ThongBaoPhatHanh(models.Model):
     chuc_vu = models.CharField(
         max_length=30,
         blank=True,
-        help_text='LE_TAN | KHO | ... khi pham_vi=CHUC_VU',
+        help_text='LE_TAN | BAN_THUOC | KE_TOAN khi pham_vi=CHUC_VU',
     )
     nguoi_nhan = models.ForeignKey(
         'nguoidung.NguoiDung',

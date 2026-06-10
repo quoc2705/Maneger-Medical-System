@@ -134,16 +134,21 @@ const Http = {
     const config = { method: phuong, headers };
     if (body) config.body = JSON.stringify(body);
 
+    let fetchUrl = `${CFG.API_BASE}${url}`;
+    if (phuong === 'GET') {
+        config.cache = 'no-store';
+        fetchUrl += (fetchUrl.includes('?') ? '&' : '?') + '_=' + Date.now();
+    }
+
     try {
-        // SỬA: dùng url đã xử lý, không dùng duongDan
-        let res = await fetch(`${CFG.API_BASE}${url}`, config);
+        let res = await fetch(fetchUrl, config);
 
         // Token hết hạn → thử làm mới
         if (res.status === 401 && canToken) {
             const laMoi = await Http.lamMoiToken();
             if (laMoi) {
                 headers['Authorization'] = `Bearer ${Phien.lay('accessToken')}`;
-                res = await fetch(`${CFG.API_BASE}${url}`, { ...config, headers });
+                res = await fetch(fetchUrl, { ...config, headers });
             } else {
                 Auth.dangXuat();
                 return { ok: false, status: 401, data: null };
@@ -897,18 +902,33 @@ const App = {
                     if (code === '00') {
                         Toast.ok(
                             'Thanh toán VNPay',
-                            txn ? `Mã đơn/giao dịch: ${txn}. Hệ thống sẽ xác nhận qua cổng (IPN).` : 'Giao dịch thành công.'
+                            txn
+                                ? `Mã đơn ${txn}. Hệ thống xác nhận qua IPN — kiểm tra email và mục Đơn hàng.`
+                                : 'Giao dịch thành công.'
                         );
                     } else {
                         Toast.loi(
                             'Thanh toán chưa hoàn tất',
-                            `Mã ${code}. Đơn vẫn ở trạng thái chờ thanh toán — bạn có thể thử lại từ chi tiết đơn (nếu hỗ trợ).`
+                            `Mã ${code}. Đơn vẫn chờ thanh toán — vào «Đơn hàng của tôi» để thử lại VNPay.`
                         );
                     }
                 }
                 const u = new URL(window.location.href);
                 u.search = '';
-                window.history.replaceState({}, document.title, u.pathname + u.hash);
+                const hasToken = !!(localStorage.getItem('access_token') || localStorage.getItem('accessToken'));
+                if (hasToken && typeof window.PageBenhNhanDashboard !== 'undefined') {
+                    u.pathname = '/';
+                    u.hash = '';
+                    window.history.replaceState({}, document.title, u.pathname);
+                    window.setTimeout(() => {
+                        if (window.App && window.App.loadDashboard) window.App.loadDashboard();
+                        if (window.PageBenhNhanDashboard?.chuyenTrang) {
+                            window.PageBenhNhanDashboard.chuyenTrang('don-hang');
+                        }
+                    }, 300);
+                } else {
+                    window.history.replaceState({}, document.title, u.pathname + u.hash);
+                }
             };
             window.setTimeout(schedule, 200);
         } catch (e) {
@@ -1029,8 +1049,12 @@ const App = {
             return;
         }
 
-        // QUAN TRỌNG: NẾU ĐÃ Ở TRANG CHỦ VÀ CÓ TOKEN, HIỂN THỊ DASHBOARD
-        // KHÔNG REDIRECT THÊM LẦN NÀO NỮA
+        // Có token — admin luôn vào panel quản trị, không dùng trang chủ fallback
+        if (userInfo.vai_tro === 'ADMIN' || userInfo.vai_tro === 'admin') {
+            window.location.href = '/admin-dashboard/';
+            return;
+        }
+
         console.log('User is logged in, showing dashboard');
         await this.loadDashboard();
     },
@@ -1213,6 +1237,11 @@ const App = {
             }
         }
         
+        if ((userRole || '').toUpperCase() === 'ADMIN') {
+            window.location.href = '/admin-dashboard/';
+            return;
+        }
+
         if ((userRole || '').toLowerCase() === 'benh_nhan' && typeof window.PageBenhNhanDashboard !== 'undefined') {
             console.log('Using PageBenhNhanDashboard.render()');
             window.PageBenhNhanDashboard.render();
@@ -1234,15 +1263,6 @@ const App = {
                 window.PageBanThuocDashboard.render
             ) {
                 window.PageBanThuocDashboard.render();
-                return;
-            }
-            if (
-                (userRole || '').toLowerCase() === 'nhan_vien' &&
-                chucNv === 'KHO' &&
-                typeof window.PageKhoDashboard !== 'undefined' &&
-                window.PageKhoDashboard.render
-            ) {
-                window.PageKhoDashboard.render();
                 return;
             }
             if (

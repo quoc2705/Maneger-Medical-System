@@ -307,8 +307,15 @@ const PageLeTanDashboard = {
       dia_chi: document.getElementById('lt-dk-dc')?.value?.trim(),
     };
     const res = await Http.tao('/admin/benh-nhan/', body);
-    if (res.ok) Toast.hien('Thành công', `Mã BN: ${res.data?.ma_benh_nhan || ''}`, 'success');
-    else Toast.loi('Lỗi', (res.data && JSON.stringify(res.data)) || '', 'error');
+    if (res.ok) {
+      Toast.hien('Thành công', `Mã BN: ${res.data?.ma_benh_nhan || ''}`, 'success');
+      ['lt-dk-user', 'lt-dk-pw1', 'lt-dk-pw2', 'lt-dk-hoten', 'lt-dk-email', 'lt-dk-sdt', 'lt-dk-ns', 'lt-dk-dc'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+      });
+      const gt = document.getElementById('lt-dk-gt');
+      if (gt) gt.value = 'NAM';
+    } else Toast.loi('Lỗi', this._msgApiLoi(res), 'error');
   },
 
   _caTuGioHen(iso) {
@@ -628,9 +635,7 @@ const PageLeTanDashboard = {
       Toast.hien('Đã lấy số', `${loaiLabel} — STT ${d.stt_trong_ngay ?? '—'} — ${d.ma_lich_hen || ''}`, 'success');
       await this._tiepNhanTab('hang-cho');
     } else {
-      const msg =
-        res.data != null ? JSON.stringify(res.data) : res.statusText || 'Không có phản hồi từ máy chủ';
-      Toast.loi('Không lấy số được', msg, 'error');
+      Toast.loi('Không lấy số được', this._msgApiLoi(res), 'error');
     }
   },
 
@@ -688,7 +693,7 @@ const PageLeTanDashboard = {
   async _doCheckIn(lichId) {
     const res = await Http.tao(`/lich-hen/lich-hen/${lichId}/check_in/`, {});
     if (res.ok) Toast.hien('Check-in', 'Đã tiếp nhận', 'success');
-    else Toast.loi('Lỗi', JSON.stringify(res.data), 'error');
+    else Toast.loi('Lỗi', this._msgApiLoi(res), 'error');
     if (document.getElementById('lt-ci-panel')) {
       await this._tiepNhanTab(window.__ltTiepNhanTab || 'co-lich');
     } else {
@@ -702,7 +707,7 @@ const PageLeTanDashboard = {
     if (!bacSi) return Toast.canh('Chọn bác sĩ', '');
     const res = await Http.tao(`/lich-hen/lich-hen/${lichId}/phan_cong_bac_si/`, { bac_si: bacSi });
     if (res.ok) Toast.hien('Đã phân công', '', 'success');
-    else Toast.loi('Lỗi', JSON.stringify(res.data), 'error');
+    else Toast.loi('Lỗi', this._msgApiLoi(res), 'error');
     if (document.getElementById('lt-ci-panel')) {
       await this._tiepNhanTab(window.__ltTiepNhanTab || 'co-lich');
     } else {
@@ -716,7 +721,7 @@ const PageLeTanDashboard = {
     if (!bacSi) return Toast.canh('Chọn bác sĩ', '');
     const res = await Http.tao(`/lich-hen/lich-hen/${lichId}/phan_cong_bac_si/`, { bac_si: bacSi });
     if (res.ok) Toast.hien('Đã phân công BS', '', 'success');
-    else Toast.loi('Lỗi', JSON.stringify(res.data), 'error');
+    else Toast.loi('Lỗi', this._msgApiLoi(res), 'error');
     await this._tiepNhanTab('hang-cho');
   },
 
@@ -729,7 +734,7 @@ const PageLeTanDashboard = {
       ten_phong: ten,
     });
     if (res.ok) Toast.hien('Đã cập nhật phòng', '', 'success');
-    else Toast.loi('Lỗi', JSON.stringify(res.data), 'error');
+    else Toast.loi('Lỗi', this._msgApiLoi(res), 'error');
     await this._tiepNhanTab('hang-cho');
   },
 
